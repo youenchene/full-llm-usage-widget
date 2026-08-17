@@ -77,6 +77,7 @@ enum SelfCheck {
         checkSettings(&failures)
         checkNotifications(&failures)
         checkCursorDatabase(&failures)
+        checkCurrency(&failures)
 
         print(failures == 0 ? "Self-check OK" : "Self-check FAILED (\(failures) failure(s))")
         return failures == 0 ? 0 : 1
@@ -196,6 +197,66 @@ enum SelfCheck {
         )
         notifier.check(plans: [nextCycle], now: now)
         check("notify.new-cycle-again", poster.count == 2)
+    }
+
+    // MARK: - Currency conversion + quota average (menu-bar two-line label)
+
+    private static func checkCurrency(_ failures: inout Int) {
+        func check(_ name: String, _ condition: Bool) {
+            if condition { print("PASS \(name)") } else { print("FAIL \(name)"); failures += 1 }
+        }
+
+        let posix = Locale(identifier: "en_US_POSIX")
+        let rate = Decimal(string: "0.9", locale: posix)!
+
+        // Conversion: EUR passes through unchanged; USD converts; unknown currencies are skipped.
+        check("currency.eur-identity", CurrencyMath.toEUR(amount: Decimal(10), code: "EUR", eurPerUSD: rate) == Decimal(10))
+        check("currency.usd-to-eur", CurrencyMath.toEUR(amount: Decimal(10), code: "USD", eurPerUSD: rate) == Decimal(9))
+        check("currency.unknown-nil", CurrencyMath.toEUR(amount: Decimal(10), code: "GBP", eurPerUSD: rate) == nil)
+
+        // Exchange rate parse (Frankfurter shape: base USD, rates.EUR).
+        let frankfurter = #"{"amount":1.0,"base":"USD","date":"2026-08-17","rates":{"EUR":0.9212}}"#
+        if let eur = try? ExchangeRateFetcher.parse(Data(frankfurter.utf8)) {
+            check("rate.parse", abs(NSDecimalNumber(decimal: eur).doubleValue - 0.9212) < 0.0001)
+        } else {
+            check("rate.parse", false)
+        }
+
+        // Quota average: OpenCode Go monthly 40% + Codex weekly 20% → 30%.
+        let go = Plan(
+            id: "opencode.go", provider: .openCode, name: "OpenCode Go", kind: .quota,
+            limitWindows: [
+                LimitWindow(label: "5h", used: 10, limit: 100, resetsAt: nil),
+                LimitWindow(label: "weekly", used: 20, limit: 100, resetsAt: nil),
+                LimitWindow(label: "monthly", used: 40, limit: 100, resetsAt: nil)
+            ]
+        )
+        let codex = Plan(
+            id: "codex", provider: .codex, name: "Codex", kind: .quota,
+            limitWindows: [
+                LimitWindow(label: "5h", used: 55, limit: 100, resetsAt: nil),
+                LimitWindow(label: "weekly", used: 20, limit: 100, resetsAt: nil)
+            ]
+        )
+        check("quota.average", abs((MenuBarSelection.averageQuotaProgress(plans: [go, codex])?.value ?? -1) - 0.3) < 0.0001)
+        check("quota.average-weekly-fallback", MenuBarSelection.averageQuotaProgress(plans: [codex])?.value == 0.2)
+        check("quota.average-empty", MenuBarSelection.averageQuotaProgress(plans: []) == nil)
+
+        // Codex often exposes only its "5h" window (no weekly); it must still count.
+        let codex5hOnly = Plan(
+            id: "codex", provider: .codex, name: "Codex", kind: .quota,
+            limitWindows: [LimitWindow(label: "5h", used: 10, limit: 100, resetsAt: nil)]
+        )
+        check("quota.average-5h-fallback",
+              abs((MenuBarSelection.averageQuotaProgress(plans: [go, codex5hOnly])?.value ?? -1) - 0.25) < 0.0001)
+        check("quota.average-5h-only", MenuBarSelection.averageQuotaProgress(plans: [codex5hOnly])?.value == 0.1)
+
+        // A spend plan is ignored by the quota average.
+        let spend = Plan(
+            id: "scaleway", provider: .scaleway, name: "Scaleway", kind: .spend,
+            spent: Decimal(40), currencyCode: "EUR"
+        )
+        check("quota.average-ignores-spend", MenuBarSelection.averageQuotaProgress(plans: [go, spend])?.value == 0.4)
     }
 
     // MARK: - Provider parsing

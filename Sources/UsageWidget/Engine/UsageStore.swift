@@ -16,6 +16,7 @@ final class UsageStore {
     private let backoff = BackoffPolicy.standard
     private let settings: SettingsModel
     private let notifier: NearLimitNotifier?
+    private let rates: ExchangeRateStore
 
     /// Per-provider refresh timing: when it may next be polled, and its recent failure count.
     private struct ProviderState {
@@ -28,12 +29,14 @@ final class UsageStore {
         providers: [any UsageProvider],
         cache: SnapshotCache,
         settings: SettingsModel,
-        notifier: NearLimitNotifier? = nil
+        notifier: NearLimitNotifier? = nil,
+        rates: ExchangeRateStore
     ) {
         self.providers = providers
         self.cache = cache
         self.settings = settings
         self.notifier = notifier
+        self.rates = rates
     }
 
     /// The plans the widget has fetched, with Budgets applied (so spend plans can render a
@@ -47,6 +50,29 @@ final class UsageStore {
     /// Progress (e.g. spend with no Budget) are ignored.
     var menuBarProgress: Progress? {
         MenuBarSelection.progress(plans: visiblePlans, focus: settings.menuBarFocus)
+    }
+
+    /// Total EUR spent across spend plans (non-EUR converted via the cached rate). nil when there's
+    /// no spend data, or when no exchange rate is available to convert non-EUR amounts.
+    var totalSpentEUR: Decimal? {
+        guard let eurPerUSD = rates.eurPerUSD else { return nil }
+        var total = Decimal(0)
+        var any = false
+        for plan in visiblePlans where plan.kind == .spend {
+            guard let spent = plan.spent,
+                  let eur = CurrencyMath.toEUR(
+                    amount: spent, code: plan.currencyCode ?? "USD", eurPerUSD: eurPerUSD
+                  )
+            else { continue }
+            total += eur
+            any = true
+        }
+        return any ? total : nil
+    }
+
+    /// Average percentage (0–1) across quota plans, for the menu-bar's second line.
+    var averageQuotaProgress: Progress? {
+        MenuBarSelection.averageQuotaProgress(plans: visiblePlans)
     }
 
     /// Restore the last-good `Snapshot` so the widget renders instantly on launch.
@@ -67,6 +93,7 @@ final class UsageStore {
     /// `force` bypasses the gate (used after sign-in/sign-out and the manual refresh button) so a
     /// newly-connected method shows immediately instead of waiting out the poll interval.
     func refresh(force: Bool = false) async {
+        await rates.refresh()
         let now = Date()
 
         for provider in providers {

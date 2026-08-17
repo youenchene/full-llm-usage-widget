@@ -2,8 +2,9 @@ import AppKit
 import SwiftUI
 import Observation
 
-/// Owns the menu-bar `NSStatusItem`, its `NSPopover`, and the on-demand Settings/Accounts windows,
-/// and keeps the menu-bar title in sync with the store's focused plan.
+/// Owns the menu-bar `NSStatusItem`, its `NSPopover`, and the on-demand Settings/Accounts windows.
+/// The status item hosts a two-line label (total € spent + average quota %) that SwiftUI keeps in
+/// sync with the store via `@Observable`.
 @MainActor
 final class StatusBarController: NSObject {
     private let statusItem: NSStatusItem
@@ -13,6 +14,7 @@ final class StatusBarController: NSObject {
     private let providers: [any UsageProvider]
     private var settingsWindow: NSWindow?
     private var accountsWindow: NSWindow?
+    private var labelHosting: NSHostingView<MenuBarSpendLabel>?
 
     init(store: UsageStore, providers: [any UsageProvider], settings: SettingsModel) {
         self.store = store
@@ -41,32 +43,39 @@ final class StatusBarController: NSObject {
             )
         )
 
-        if let button = statusItem.button {
-            button.title = Self.title(for: store.menuBarProgress)
-            button.target = self
-            button.action = #selector(togglePopover(_:))
-        }
+        // A two-line label can't render in `button.title`, so host the SwiftUI label in a custom
+        // view and drive the popover from a click gesture on it. The hosting view starts with a
+        // zero frame, so it's sized to its content before assigning — otherwise the status item
+        // collapses to nothing.
+        let hosting = NSHostingView(rootView: MenuBarSpendLabel(store: store))
+        hosting.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(togglePopover(_:))))
+        labelHosting = hosting
+        statusItem.view = hosting
+        resizeLabel()
         observe()
     }
 
+    /// Resize the hosted label to fit its current SwiftUI content, and re-measure the status item
+    /// so it tracks the label as values change (a custom view isn't auto-sized after assignment).
+    private func resizeLabel() {
+        guard let hosting = labelHosting else { return }
+        let fitting = hosting.fittingSize
+        let size = NSSize(width: max(fitting.width, 1), height: max(fitting.height, 22))
+        hosting.setFrameSize(size)
+        statusItem.length = size.width
+    }
+
+    /// Re-run whenever the label's inputs change so the status item width stays in sync.
     private func observe() {
         withObservationTracking {
-            _ = store.plans
-            _ = settings.value
+            _ = store.totalSpentEUR
+            _ = store.menuBarProgress
         } onChange: { [weak self] in
             Task { @MainActor in
-                self?.refreshTitle()
+                self?.resizeLabel()
                 self?.observe()
             }
         }
-    }
-
-    private func refreshTitle() {
-        statusItem.button?.title = Self.title(for: store.menuBarProgress)
-    }
-
-    private static func title(for progress: Progress?) -> String {
-        progress.map { "\(Int(($0.value * 100).rounded()))%" } ?? "LLM"
     }
 
     // MARK: - Settings window
@@ -113,8 +122,8 @@ final class StatusBarController: NSObject {
     @objc private func togglePopover(_ sender: Any?) {
         if popover.isShown {
             popover.performClose(sender)
-        } else if let button = statusItem.button {
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        } else if let view = statusItem.view {
+            popover.show(relativeTo: view.bounds, of: view, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
         }
     }

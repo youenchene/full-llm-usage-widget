@@ -13,6 +13,7 @@ final class CompositionRoot {
         let cache = SnapshotCache(bundleIdentifier: AppInfo.bundleIdentifier)
         let credentials = CredentialStore(service: AppInfo.bundleIdentifier)
         let settings = SettingsModel(store: SettingsStore(bundleIdentifier: AppInfo.bundleIdentifier))
+        let rates = ExchangeRateStore(bundleIdentifier: AppInfo.bundleIdentifier)
 
         let providers: [any UsageProvider] = [
             ClaudeProvider(tokens: credentials),
@@ -36,7 +37,7 @@ final class CompositionRoot {
             store: NotificationCycleStore(bundleIdentifier: AppInfo.bundleIdentifier)
         )
 
-        let store = UsageStore(providers: providers, cache: cache, settings: settings, notifier: notifier)
+        let store = UsageStore(providers: providers, cache: cache, settings: settings, notifier: notifier, rates: rates)
         store.loadSnapshot()
 
         self.settings = settings
