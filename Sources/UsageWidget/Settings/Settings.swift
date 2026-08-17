@@ -58,8 +58,6 @@ extension MenuBarFocus: Codable {
 
 /// The persisted user settings. Every field has a default so an absent value decodes cleanly.
 struct SettingsState: Codable, Equatable, Sendable {
-    /// Providers the widget tracks and shows. Disabling a provider hides it and skips its fetch.
-    var enabledProviders: Set<Provider>
     /// Per-plan monthly Budgets, keyed by spend plan id. An unset budget means "no urgency".
     var budgets: [String: Budget]
     /// Menu-bar focus: auto (most-urgent) or pinned to a specific plan.
@@ -73,14 +71,12 @@ struct SettingsState: Codable, Equatable, Sendable {
     var providerOrder: [Provider]
 
     init(
-        enabledProviders: Set<Provider>,
         budgets: [String: Budget],
         menuBarFocus: MenuBarFocus,
         thresholds: Thresholds,
         pollIntervalSeconds: Double,
         providerOrder: [Provider]
     ) {
-        self.enabledProviders = enabledProviders
         self.budgets = budgets
         self.menuBarFocus = menuBarFocus
         self.thresholds = thresholds
@@ -89,9 +85,6 @@ struct SettingsState: Codable, Equatable, Sendable {
     }
 
     static let `default` = SettingsState(
-        // Cursor is opt-in: it reads the user's local Cursor database, which requires Full Disk
-        // Access. Never enable it implicitly (see docs/cursor-full-disk-access.md).
-        enabledProviders: Set(Provider.allCases).subtracting([.cursor]),
         budgets: [:],
         menuBarFocus: .auto,
         thresholds: Thresholds(),
@@ -100,14 +93,13 @@ struct SettingsState: Codable, Equatable, Sendable {
     )
 
     private enum CodingKeys: String, CodingKey {
-        case enabledProviders, budgets, menuBarFocus, thresholds, pollIntervalSeconds, providerOrder
+        case budgets, menuBarFocus, thresholds, pollIntervalSeconds, providerOrder
     }
 
     /// Decode with a graceful fallback for `providerOrder`, so a `settings.json` written before
     /// reordering existed still loads instead of resetting every setting to defaults.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.enabledProviders = try container.decode(Set<Provider>.self, forKey: .enabledProviders)
         self.budgets = try container.decode([String: Budget].self, forKey: .budgets)
         self.menuBarFocus = try container.decode(MenuBarFocus.self, forKey: .menuBarFocus)
         self.thresholds = try container.decode(Thresholds.self, forKey: .thresholds)

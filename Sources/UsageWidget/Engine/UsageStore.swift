@@ -36,12 +36,11 @@ final class UsageStore {
         self.notifier = notifier
     }
 
-    /// The plans the user has enabled, with Budgets applied (so spend plans can render a
-    /// Progress). Disabled providers are hidden and their plans excluded from urgency.
+    /// The plans the widget has fetched, with Budgets applied (so spend plans can render a
+    /// Progress). A signed-out provider has no plans here (sign-out clears them), so this is the
+    /// full set of plans to show.
     var visiblePlans: [Plan] {
-        plans
-            .filter { settings.isEnabled($0.provider) }
-            .map { settings.applyingBudget(to: $0) }
+        plans.map { settings.applyingBudget(to: $0) }
     }
 
     /// The menu-bar's single `Progress` under the current focus. Plans without a computable
@@ -57,16 +56,17 @@ final class UsageStore {
         lastUpdatedAt = snapshot.fetchedAt
     }
 
-    /// Refresh every enabled `UsageProvider`, then persist the last-good `Snapshot` and run the
+    /// Refresh every `UsageProvider`, then persist the last-good `Snapshot` and run the
     /// near-limit notifier.
     ///
     /// Each provider is gated by its `minimumPollInterval` and an exponential backoff on failure.
-    /// A failed provider never clears existing usage — it falls back to the last-good value and
+    /// A signed-out provider throws `notSignedIn` (before any network call) and is skipped; a
+    /// failed provider never clears existing usage — it falls back to the last-good value and
     /// records a per-provider error for the UI.
     func refresh() async {
         let now = Date()
 
-        for provider in providers where settings.isEnabled(provider.provider) {
+        for provider in providers {
             let id = provider.provider
             var state = states[id] ?? ProviderState()
             guard now >= state.nextAllowedAt else { continue }
@@ -88,7 +88,7 @@ final class UsageStore {
         }
 
         // Refresh auth state so the UI can flip between "sign in" and plan cards.
-        for provider in providers where settings.isEnabled(provider.provider) {
+        for provider in providers {
             authStates[provider.provider] = await provider.authState()
         }
 

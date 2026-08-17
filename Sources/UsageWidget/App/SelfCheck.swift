@@ -94,7 +94,6 @@ enum SelfCheck {
         defer { try? FileManager.default.removeItem(at: dir) }
 
         var state = SettingsState.default
-        state.enabledProviders.remove(.gemini)
         state.budgets["scaleway"] = Budget(amount: Decimal(50), currencyCode: "EUR")
         state.menuBarFocus = .pinned(planID: "scaleway")
         state.thresholds = Thresholds(warning: 0.6, critical: 0.8)
@@ -108,7 +107,6 @@ enum SelfCheck {
             check("settings.roundtrip", loaded == state)
             check("settings.focus-pinned", loaded?.menuBarFocus == .pinned(planID: "scaleway"))
             check("settings.budget", loaded?.budgets["scaleway"]?.amount == Decimal(50))
-            check("settings.disabled", loaded?.enabledProviders.contains(.gemini) == false)
             check("settings.provider-order", loaded?.providerOrder.first == .scaleway)
         } catch {
             print("FAIL settings.roundtrip: \(error)")
@@ -409,8 +407,8 @@ enum SelfCheck {
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO ItemTable (key, value) VALUES (?, ?);", -1, &stmt, nil) == SQLITE_OK,
                   let stmt else { return }
-            key.withCString { sqlite3_bind_text(stmt, 1, $0, -1, CursorStateDB.sqliteTransient) }
-            value.withCString { sqlite3_bind_text(stmt, 2, $0, -1, CursorStateDB.sqliteTransient) }
+            _ = key.withCString { sqlite3_bind_text(stmt, 1, $0, -1, CursorStateDB.sqliteTransient) }
+            _ = value.withCString { sqlite3_bind_text(stmt, 2, $0, -1, CursorStateDB.sqliteTransient) }
             sqlite3_step(stmt)
             sqlite3_finalize(stmt)
         }

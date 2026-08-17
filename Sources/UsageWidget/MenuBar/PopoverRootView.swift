@@ -10,10 +10,12 @@ struct PopoverRootView: View {
     let onOpenAccounts: () -> Void
     let onQuit: () -> Void
 
-    /// The wired providers in the user's persisted order, filtered to enabled ones only.
+    /// The wired providers in the user's persisted order, filtered to those with fetched plans
+    /// (i.e. signed in). A provider with no plans doesn't render, so it's excluded from reordering.
     private var orderedVisibleProviders: [Provider] {
         let wired = Set(providers.map(\.provider))
-        return settings.providerOrder.filter { wired.contains($0) && settings.isEnabled($0) }
+        let hasPlans = Set(store.visiblePlans.map(\.provider))
+        return settings.providerOrder.filter { wired.contains($0) && hasPlans.contains($0) }
     }
 
     var body: some View {

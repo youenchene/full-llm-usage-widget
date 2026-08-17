@@ -19,7 +19,6 @@ final class SettingsModel {
 
     // MARK: - Read accessors
 
-    var enabledProviders: Set<Provider> { value.enabledProviders }
     var budgets: [String: Budget] { value.budgets }
     var menuBarFocus: MenuBarFocus { value.menuBarFocus }
     var thresholds: Thresholds { value.thresholds }
@@ -33,7 +32,6 @@ final class SettingsModel {
         return stored + missing
     }
 
-    func isEnabled(_ provider: Provider) -> Bool { value.enabledProviders.contains(provider) }
     func budget(for planID: String) -> Budget? { value.budgets[planID] }
 
     /// Apply the user's Budget (if any) to a spend Plan so it can render a Progress (ADR-0002).
@@ -45,13 +43,6 @@ final class SettingsModel {
     }
 
     // MARK: - Mutations (each persists the change)
-
-    func setEnabled(_ enabled: Bool, for provider: Provider) {
-        commit {
-            if enabled { $0.enabledProviders.insert(provider) }
-            else { $0.enabledProviders.remove(provider) }
-        }
-    }
 
     /// Set or clear a monthly Budget for a spend plan. A nil/zero amount clears it (no urgency).
     func setBudget(_ amount: Decimal?, currencyCode: String, for planID: String) {

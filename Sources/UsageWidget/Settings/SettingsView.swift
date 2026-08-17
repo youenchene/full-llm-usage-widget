@@ -8,8 +8,8 @@ struct SpendPlanInfo: Identifiable {
     let currency: String
 }
 
-/// The settings window: provider toggles, spend-plan budgets, menu-bar focus, threshold colors,
-/// poll interval, and launch-at-login.
+/// The settings window: spend-plan budgets, menu-bar focus, threshold colors, poll interval, and
+/// launch-at-login. Provider connection lives in the Accounts panel.
 struct SettingsView: View {
     let settings: SettingsModel
     let store: UsageStore
@@ -27,7 +27,6 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            providersSection
             budgetsSection
             menuBarSection
             thresholdsSection
@@ -37,25 +36,6 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 400)
         .fixedSize(horizontal: false, vertical: true)
-    }
-
-    // MARK: - Providers
-
-    private var providersSection: some View {
-        Section("Providers") {
-            ForEach(Provider.allCases) { provider in
-                Toggle(provider.displayName, isOn: providerBinding(provider))
-                    .toggleStyle(.switch)
-                    .tint(.blue)
-            }
-        }
-    }
-
-    private func providerBinding(_ provider: Provider) -> Binding<Bool> {
-        Binding(
-            get: { settings.isEnabled(provider) },
-            set: { settings.setEnabled($0, for: provider) }
-        )
     }
 
     // MARK: - Budgets

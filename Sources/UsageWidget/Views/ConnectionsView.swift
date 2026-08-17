@@ -8,13 +8,12 @@ struct ConnectionsView: View {
     let settings: SettingsModel
 
     var body: some View {
-        let visible = providers.filter { settings.isEnabled($0.provider) }
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Connect or disconnect providers. Live usage appears in the menu-bar panel.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                ForEach(visible, id: \.provider) { ConnectionRow(provider: $0, store: store) }
+                ForEach(providers, id: \.provider) { ConnectionRow(provider: $0, store: store) }
             }
             .padding(16)
             .frame(width: 348, alignment: .leading)
