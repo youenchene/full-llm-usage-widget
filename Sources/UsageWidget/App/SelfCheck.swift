@@ -147,6 +147,44 @@ enum SelfCheck {
             check("mistral.parse", false)
         }
 
+        // Scaleway: sum `value` for "Generative APIs" records only (filtering other products).
+        let scalewayJSON = #"""
+        {"consumptions":[
+           {"value":{"units":12,"nanos":340000000,"currency_code":"EUR"},
+            "product_name":"Generative APIs"},
+           {"value":{"units":5,"nanos":0,"currency_code":"EUR"},
+            "product_name":"Object Storage"}
+         ],
+         "total_count":2}
+        """#
+        if let page = try? ScalewayUsageFetcher.parse(Data(scalewayJSON.utf8)) {
+            let spent = NSDecimalNumber(decimal: page.spent).doubleValue
+            check("scaleway.parse.spent", abs(spent - 12.34) < 0.0001)
+            check("scaleway.parse.currency", page.currency == "EUR")
+            check("scaleway.parse.total", page.totalCount == 2)
+        } else {
+            check("scaleway.parse", false)
+        }
+
+        // OpenCode Go: three windows (5h / weekly / monthly) as integer percents.
+        let openCodeJSON = #"""
+        {"usage":{
+           "rolling":{"status":"ok","percent":42,"resetsAt":"2026-08-17T20:12:00.000Z"},
+           "weekly":{"status":"ok","percent":17,"resetsAt":"2026-08-23T23:59:59.000Z"},
+           "monthly":{"status":"ok","percent":3,"resetsAt":"2026-08-31T23:59:59.000Z"}}}
+        """#
+        if let usage = try? OpenCodeGoFetcher.parse(Data(openCodeJSON.utf8)) {
+            let plan = usage.plans.first
+            check("opencode.parse.windows", plan?.limitWindows.count == 3)
+            check("opencode.parse.5h", plan?.limitWindows.first(where: { $0.label == "5h" })?.used == 42)
+            check("opencode.parse.weekly", plan?.limitWindows.first(where: { $0.label == "weekly" })?.used == 17)
+            check("opencode.parse.monthly", plan?.limitWindows.first(where: { $0.label == "monthly" })?.used == 3)
+            check("opencode.parse.name", plan?.name == "OpenCode Go")
+            check("opencode.parse.kind", plan?.kind == .quota)
+        } else {
+            check("opencode.parse", false)
+        }
+
         // Claude billing: `amount` is cents (decimal string); sum across buckets.
         let claudeBillingJSON = #"""
         {"data":[

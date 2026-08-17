@@ -9,6 +9,7 @@ struct SignInView: View {
 
     @State private var continuation: SignInContinuation
     @State private var input = ""
+    @State private var fieldValues: [String: String] = [:]
     @State private var error: String?
     @State private var isWorking = false
 
@@ -33,6 +34,8 @@ struct SignInView: View {
                 textFlow(instructions: instructions, placeholder: "Paste code", action: submit)
             case .needsKey(let instructions, let submit):
                 textFlow(instructions: instructions, placeholder: "Paste API key", action: submit)
+            case .needsFields(let title, let fields, let submit):
+                fieldsFlow(title: title, fields: fields, action: submit)
             case .deviceCode(let userCode, let verificationURL, let instructions, let poll):
                 deviceFlow(userCode: userCode, verificationURL: verificationURL, instructions: instructions, poll: poll)
             }
@@ -104,6 +107,46 @@ struct SignInView: View {
             }
             .disabled(input.isEmpty || isWorking)
         }
+    }
+
+    // MARK: - Multi-field credential flow (Scaleway)
+
+    private func fieldsFlow(
+        title: String,
+        fields: [SignInField],
+        action: @escaping @Sendable ([String: String]) async throws -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            ForEach(fields) { field in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(field.label).font(.caption2).foregroundStyle(.secondary)
+                    if field.isSecure {
+                        SecureField(field.placeholder, text: binding(for: field.id))
+                            .textFieldStyle(.roundedBorder)
+                    } else {
+                        TextField(field.placeholder, text: binding(for: field.id))
+                            .textFieldStyle(.roundedBorder)
+                    }
+                }
+            }
+            if let error {
+                Text(error).font(.caption2).foregroundStyle(.red)
+            }
+            Button {
+                submit { try await action(fieldValues) }
+            } label: {
+                Text(isWorking ? "Submitting…" : "Submit")
+            }
+            .disabled(isWorking)
+        }
+    }
+
+    private func binding(for id: String) -> Binding<String> {
+        Binding(
+            get: { fieldValues[id] ?? "" },
+            set: { fieldValues[id] = $0 }
+        )
     }
 
     // MARK: - Device flow (Copilot)

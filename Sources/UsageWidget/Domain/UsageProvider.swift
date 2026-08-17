@@ -39,6 +39,21 @@ struct SignInOption: Sendable {
     let start: @Sendable () async throws -> SignInContinuation
 }
 
+/// A single text field a sign-in form must collect (label + placeholder + secure toggle).
+struct SignInField: Sendable, Identifiable {
+    let id: String
+    let label: String
+    let placeholder: String
+    let isSecure: Bool
+
+    init(id: String, label: String, placeholder: String, isSecure: Bool = false) {
+        self.id = id
+        self.label = label
+        self.placeholder = placeholder
+        self.isSecure = isSecure
+    }
+}
+
 /// How a sign-in flow proceeds after it begins. Different providers need different UX:
 /// Codex completes autonomously via a loopback redirect; Claude needs the user to paste a code;
 /// Copilot uses the GitHub device flow; Mistral accepts a pasted admin API key.
@@ -54,6 +69,9 @@ enum SignInContinuation: Sendable {
     case deviceCode(userCode: String, verificationURL: URL, instructions: String, poll: @Sendable () async throws -> Void)
     /// API-key flow: prompt for a pasted key and call `submit(key)`. Used by Mistral.
     case needsKey(instructions: String, submit: @Sendable (String) async throws -> Void)
+    /// Multi-field credential form (e.g. Scaleway's secret key + organization ID). Call
+    /// `submit(values)` with the collected values keyed by `SignInField.id`.
+    case needsFields(title: String, fields: [SignInField], submit: @Sendable ([String: String]) async throws -> Void)
 }
 
 enum ProviderAuthState: Sendable, Equatable {
