@@ -25,6 +25,14 @@ final class SettingsModel {
     var thresholds: Thresholds { value.thresholds }
     var pollInterval: Duration { .seconds(value.pollIntervalSeconds) }
 
+    /// Display order of providers, with any not-yet-recorded providers appended in canonical
+    /// order (so a newly-added provider shows up instead of being silently dropped).
+    var providerOrder: [Provider] {
+        let stored = value.providerOrder
+        let missing = Provider.allCases.filter { !stored.contains($0) }
+        return stored + missing
+    }
+
     func isEnabled(_ provider: Provider) -> Bool { value.enabledProviders.contains(provider) }
     func budget(for planID: String) -> Budget? { value.budgets[planID] }
 
@@ -66,6 +74,13 @@ final class SettingsModel {
 
     func setPollIntervalSeconds(_ seconds: Double) {
         commit { $0.pollIntervalSeconds = seconds }
+    }
+
+    /// Persist a new relative order for a subset of providers (the visible ones). Any provider
+    /// not in `ordered` keeps its prior relative order and trails the ordered subset.
+    func reorderProviders(_ ordered: [Provider]) {
+        let rest = providerOrder.filter { !ordered.contains($0) }
+        commit { $0.providerOrder = ordered + rest }
     }
 
     // MARK: - Persistence

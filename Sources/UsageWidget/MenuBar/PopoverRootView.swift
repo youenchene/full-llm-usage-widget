@@ -10,8 +10,14 @@ struct PopoverRootView: View {
     let onOpenAccounts: () -> Void
     let onQuit: () -> Void
 
+    /// The wired providers in the user's persisted order, filtered to enabled ones only.
+    private var orderedVisibleProviders: [Provider] {
+        let wired = Set(providers.map(\.provider))
+        return settings.providerOrder.filter { wired.contains($0) && settings.isEnabled($0) }
+    }
+
     var body: some View {
-        let visibleProviders = providers.filter { settings.isEnabled($0.provider) }
+        let ordered = orderedVisibleProviders
         let plansByProvider = Dictionary(grouping: store.visiblePlans, by: { $0.provider })
 
         ScrollView {
@@ -27,9 +33,18 @@ struct PopoverRootView: View {
                 if store.visiblePlans.isEmpty {
                     emptyState
                 } else {
-                    ForEach(visibleProviders, id: \.provider) { provider in
-                        if let plans = plansByProvider[provider.provider], !plans.isEmpty {
-                            ForEach(plans) { PlanCard(plan: $0, error: store.errors[provider.provider]) }
+                    ForEach(ordered, id: \.self) { provider in
+                        if let plans = plansByProvider[provider], !plans.isEmpty {
+                            let index = ordered.firstIndex(of: provider) ?? 0
+                            ProviderBlock(
+                                provider: provider,
+                                plans: plans,
+                                error: store.errors[provider],
+                                canMoveUp: index > 0,
+                                canMoveDown: index < ordered.count - 1,
+                                onMoveUp: { move(provider, up: true) },
+                                onMoveDown: { move(provider, up: false) }
+                            )
                         }
                     }
                 }
@@ -38,6 +53,16 @@ struct PopoverRootView: View {
             .frame(width: DesignTokens.popoverWidth - 32, alignment: .leading)
         }
         .environment(\.thresholds, settings.thresholds)
+    }
+
+    /// Move a visible provider up or down among its visible peers, then persist the new order.
+    private func move(_ provider: Provider, up: Bool) {
+        var order = orderedVisibleProviders
+        guard let index = order.firstIndex(of: provider) else { return }
+        let target = up ? index - 1 : index + 1
+        guard order.indices.contains(target) else { return }
+        order.swapAt(index, target)
+        settings.reorderProviders(order)
     }
 
     private var header: some View {
@@ -89,5 +114,40 @@ struct PopoverRootView: View {
             RoundedRectangle(cornerRadius: DesignTokens.cornerRadius, style: .continuous)
                 .fill(.quaternary.opacity(0.35))
         )
+    }
+}
+
+/// One provider's plan cards plus up/down reorder controls, so the user can reorder providers on
+/// the main tab. Multi-plan providers (e.g. OpenCode Go + Zen) stay grouped as one block.
+private struct ProviderBlock: View {
+    let provider: Provider
+    let plans: [Plan]
+    let error: String?
+    let canMoveUp: Bool
+    let canMoveDown: Bool
+    let onMoveUp: () -> Void
+    let onMoveDown: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 6) {
+            VStack(alignment: .leading, spacing: DesignTokens.cardSpacing) {
+                ForEach(plans) { PlanCard(plan: $0, error: error) }
+            }
+            VStack(spacing: 2) {
+                Button(action: onMoveUp) {
+                    Image(systemName: "chevron.up")
+                }
+                .buttonStyle(.borderless)
+                .disabled(!canMoveUp)
+                .help("Move up")
+                Button(action: onMoveDown) {
+                    Image(systemName: "chevron.down")
+                }
+                .buttonStyle(.borderless)
+                .disabled(!canMoveDown)
+                .help("Move down")
+            }
+            .foregroundStyle(.secondary)
+        }
     }
 }

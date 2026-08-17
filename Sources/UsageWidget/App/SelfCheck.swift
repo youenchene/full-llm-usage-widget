@@ -97,6 +97,7 @@ enum SelfCheck {
         state.menuBarFocus = .pinned(planID: "scaleway")
         state.thresholds = Thresholds(warning: 0.6, critical: 0.8)
         state.pollIntervalSeconds = 120
+        state.providerOrder = [.scaleway, .openCode, .claude, .codex, .copilot, .gemini, .mistral]
 
         let store = SettingsStore(directory: dir)
         do {
@@ -106,6 +107,7 @@ enum SelfCheck {
             check("settings.focus-pinned", loaded?.menuBarFocus == .pinned(planID: "scaleway"))
             check("settings.budget", loaded?.budgets["scaleway"]?.amount == Decimal(50))
             check("settings.disabled", loaded?.enabledProviders.contains(.gemini) == false)
+            check("settings.provider-order", loaded?.providerOrder.first == .scaleway)
         } catch {
             print("FAIL settings.roundtrip: \(error)")
             failures += 1

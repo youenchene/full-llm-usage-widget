@@ -68,12 +68,49 @@ struct SettingsState: Codable, Equatable, Sendable {
     var thresholds: Thresholds
     /// Global poll cadence, in seconds.
     var pollIntervalSeconds: Double
+    /// Display order of providers on the main tab. Providers not listed here (e.g. newly added)
+    /// are appended in canonical order at render time.
+    var providerOrder: [Provider]
+
+    init(
+        enabledProviders: Set<Provider>,
+        budgets: [String: Budget],
+        menuBarFocus: MenuBarFocus,
+        thresholds: Thresholds,
+        pollIntervalSeconds: Double,
+        providerOrder: [Provider]
+    ) {
+        self.enabledProviders = enabledProviders
+        self.budgets = budgets
+        self.menuBarFocus = menuBarFocus
+        self.thresholds = thresholds
+        self.pollIntervalSeconds = pollIntervalSeconds
+        self.providerOrder = providerOrder
+    }
 
     static let `default` = SettingsState(
         enabledProviders: Set(Provider.allCases),
         budgets: [:],
         menuBarFocus: .auto,
         thresholds: Thresholds(),
-        pollIntervalSeconds: 60
+        pollIntervalSeconds: 60,
+        providerOrder: Provider.allCases
     )
+
+    private enum CodingKeys: String, CodingKey {
+        case enabledProviders, budgets, menuBarFocus, thresholds, pollIntervalSeconds, providerOrder
+    }
+
+    /// Decode with a graceful fallback for `providerOrder`, so a `settings.json` written before
+    /// reordering existed still loads instead of resetting every setting to defaults.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.enabledProviders = try container.decode(Set<Provider>.self, forKey: .enabledProviders)
+        self.budgets = try container.decode([String: Budget].self, forKey: .budgets)
+        self.menuBarFocus = try container.decode(MenuBarFocus.self, forKey: .menuBarFocus)
+        self.thresholds = try container.decode(Thresholds.self, forKey: .thresholds)
+        self.pollIntervalSeconds = try container.decode(Double.self, forKey: .pollIntervalSeconds)
+        self.providerOrder = try container.decodeIfPresent([Provider].self, forKey: .providerOrder)
+            ?? Provider.allCases
+    }
 }
