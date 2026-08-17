@@ -4,7 +4,8 @@ import Foundation
 ///   1. Claude Code OAuth (subscription quota: 5h + weekly).
 ///   2. Admin API key (billing spend via the Cost Report API).
 ///
-/// Either or both credentials may be present, producing up to two `Plan`s.
+/// Either or both credentials may be present, producing up to two `Plan`s. Each credential is an
+/// independent `AuthMethod`, so the Accounts panel connects/disconnects them separately.
 actor ClaudeProvider: UsageProvider {
     nonisolated let provider = Provider.claude
     nonisolated let minimumPollInterval: TimeInterval = 300  // Anthropic rate-limits hard
@@ -20,49 +21,67 @@ actor ClaudeProvider: UsageProvider {
         self.tokens = tokens
     }
 
+    // MARK: - Auth methods
+
+    nonisolated var authMethods: [AuthMethod] {
+        let oauth = self.oauth
+        let tokens = self.tokens
+        let providerID = self.provider
+        return [
+            AuthMethod(
+                id: "claude.subscription",
+                provider: .claude,
+                title: "Claude Code (subscription)",
+                instructions: "Track the 5-hour and weekly subscription quotas.",
+                ownedPlanIDs: [Provider.claude.rawValue],
+                isSignedIn: { await tokens.token(for: providerID) != nil },
+                signIn: {
+                    let pkce = PKCE.generate()
+                    let url = oauth.makeAuthorizeURL(pkce: pkce)
+                    await Browser.open(url)
+                    return .needsCode(instructions: "Approve access in your browser, then paste the code it shows (looks like \"abc123#xyz\").") { pastedCode in
+                        let token = try await oauth.exchange(pastedCode: pastedCode, pkce: pkce)
+                        await tokens.saveToken(token, for: providerID)
+                    }
+                },
+                signOut: { await tokens.clearToken(for: providerID) }
+            ),
+            AuthMethod(
+                id: "claude.api-key",
+                provider: .claude,
+                title: "Claude API (billing)",
+                instructions: "Track your API spend with an Admin API key.",
+                ownedPlanIDs: ["claude.api"],
+                isSignedIn: { await tokens.secret(for: Self.adminKeyAccount) != nil },
+                signIn: {
+                    .needsKey(instructions: "Paste your Claude Admin API key (platform.claude.com → Settings → Admin keys).") { key in
+                        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !trimmed.isEmpty else { throw OAuthError.invalidResponse }
+                        await tokens.saveSecret(trimmed, for: Self.adminKeyAccount)
+                    }
+                },
+                signOut: { await tokens.clearSecret(for: Self.adminKeyAccount) }
+            )
+        ]
+    }
+
+    // MARK: - Whole-provider operations (derived from the methods)
+
     func authState() async -> ProviderAuthState {
-        if await tokens.token(for: provider) != nil { return .signedIn }
-        if await tokens.secret(for: Self.adminKeyAccount) != nil { return .signedIn }
+        for method in authMethods where await method.isSignedIn() { return .signedIn }
         return .signedOut
     }
 
     func signIn() async throws -> SignInContinuation {
-        let oauth = self.oauth
-        let tokens = self.tokens
-        let id = self.provider
-
-        let oauthOption = SignInOption(
-            id: "oauth",
-            title: "Claude Code (subscription)",
-            instructions: "Track the 5-hour and weekly subscription quotas."
-        ) {
-            let pkce = PKCE.generate()
-            let url = oauth.makeAuthorizeURL(pkce: pkce)
-            await Browser.open(url)
-            return .needsCode(instructions: "Approve access in your browser, then paste the code it shows (looks like \"abc123#xyz\").") { pastedCode in
-                let token = try await oauth.exchange(pastedCode: pastedCode, pkce: pkce)
-                await tokens.saveToken(token, for: id)
+        .choose(options: authMethods.map { method in
+            SignInOption(id: method.id, title: method.title, instructions: method.instructions) {
+                try await method.signIn()
             }
-        }
-
-        let apiKeyOption = SignInOption(
-            id: "api-key",
-            title: "API key (billing)",
-            instructions: "Track your API spend with an Admin API key."
-        ) {
-            return .needsKey(instructions: "Paste your Claude Admin API key (platform.claude.com → Settings → Admin keys).") { key in
-                let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty else { throw OAuthError.invalidResponse }
-                await tokens.saveSecret(trimmed, for: Self.adminKeyAccount)
-            }
-        }
-
-        return .choose(options: [oauthOption, apiKeyOption])
+        })
     }
 
     func signOut() async {
-        await tokens.clearToken(for: provider)
-        await tokens.clearSecret(for: Self.adminKeyAccount)
+        for method in authMethods { await method.signOut() }
     }
 
     /// Fetch whichever methods have credentials, best-effort per method. If no method yields a

@@ -63,12 +63,16 @@ final class UsageStore {
     /// A signed-out provider throws `notSignedIn` (before any network call) and is skipped; a
     /// failed provider never clears existing usage — it falls back to the last-good value and
     /// records a per-provider error for the UI.
-    func refresh() async {
+    ///
+    /// `force` bypasses the gate (used after sign-in/sign-out and the manual refresh button) so a
+    /// newly-connected method shows immediately instead of waiting out the poll interval.
+    func refresh(force: Bool = false) async {
         let now = Date()
 
         for provider in providers {
             let id = provider.provider
             var state = states[id] ?? ProviderState()
+            if force { state.nextAllowedAt = .distantPast }
             guard now >= state.nextAllowedAt else { continue }
 
             do {
@@ -122,13 +126,17 @@ final class UsageStore {
         plans = merged
     }
 
-    /// Sign a provider out: clear its credentials, drop its plans, and persist the change so a
-    /// stale card doesn't linger across launches.
-    func signOut(_ provider: any UsageProvider) async {
-        await provider.signOut()
-        plans.removeAll { $0.provider == provider.provider }
-        authStates[provider.provider] = .signedOut
-        errors[provider.provider] = nil
+    /// Sign one auth method out: clear its credential, drop the plans it owns, and persist the
+    /// change so a stale card doesn't linger across launches. Other methods of the same provider
+    /// stay connected.
+    func signOut(_ method: AuthMethod) async {
+        await method.signOut()
+        if method.ownedPlanIDs.isEmpty {
+            plans.removeAll { $0.provider == method.provider }
+        } else {
+            plans.removeAll { method.ownedPlanIDs.contains($0.id) }
+        }
+        errors[method.provider] = nil
         try? cache.save(Snapshot(plans: plans, fetchedAt: lastUpdatedAt ?? Date()))
     }
 }

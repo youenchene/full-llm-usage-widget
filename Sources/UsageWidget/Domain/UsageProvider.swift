@@ -91,6 +91,28 @@ enum ProviderAuthState: Sendable, Equatable {
     case signedIn
 }
 
+/// A single independently-connectable credential a provider exposes.
+///
+/// Most providers expose exactly one. OpenCode exposes two (`Go` quota + `Zen` spend); Claude
+/// exposes two (subscription OAuth + admin API key). Each method is connected and disconnected on
+/// its own — the Accounts panel treats them as separate sign-ins, while the domain model keeps
+/// them as two Plans under one Provider.
+struct AuthMethod: Identifiable, Sendable {
+    /// Stable, unique across all providers (e.g. "opencode.go", "claude.subscription").
+    let id: String
+    let provider: Provider
+    /// What the Accounts panel shows (e.g. "OpenCode Go", "Claude Code (subscription)").
+    let title: String
+    /// What this method tracks, shown under its title in the Accounts panel.
+    let instructions: String
+    /// Plan ids this method owns — removed from the store when the method is signed out. Empty
+    /// means "every plan of `provider`" (the single-method default).
+    let ownedPlanIDs: [String]
+    let isSignedIn: @Sendable () async -> Bool
+    let signIn: @Sendable () async throws -> SignInContinuation
+    let signOut: @Sendable () async -> Void
+}
+
 /// The load-bearing seam: every Provider conforms to this protocol.
 ///
 /// Each conformer owns its own authentication and fetcher, and returns a normalized
@@ -103,6 +125,10 @@ protocol UsageProvider: Sendable {
     /// Hard floor the engine must never poll faster than (protects rate-limited endpoints).
     var minimumPollInterval: TimeInterval { get }
 
+    /// The independently-connectable auth methods, in display order. Defaults to a single method
+    /// wrapping `authState`/`signIn`/`signOut` (see the protocol extension).
+    var authMethods: [AuthMethod] { get }
+
     /// Whether credentials are stored and usable.
     func authState() async -> ProviderAuthState
 
@@ -113,4 +139,22 @@ protocol UsageProvider: Sendable {
 
     /// Fetch the latest usage, normalized into a `ProviderUsage`.
     func fetchUsage() async throws -> ProviderUsage
+}
+
+extension UsageProvider {
+    /// Default: a single method delegating to the provider's whole-provider `authState`/`signIn`/
+    /// `signOut`. Multi-method providers (OpenCode, Claude) override this with one method per
+    /// credential.
+    var authMethods: [AuthMethod] {
+        [AuthMethod(
+            id: provider.rawValue,
+            provider: provider,
+            title: provider.displayName,
+            instructions: "Connect \(provider.displayName).",
+            ownedPlanIDs: [],
+            isSignedIn: { await self.authState() == .signedIn },
+            signIn: { try await self.signIn() },
+            signOut: { await self.signOut() }
+        )]
+    }
 }

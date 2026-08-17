@@ -34,7 +34,7 @@ final class StatusBarController: NSObject {
                 store: store,
                 providers: providers,
                 settings: settings,
-                onRefresh: { [weak self] in Task { await self?.store.refresh() } },
+                onRefresh: { [weak self] in Task { await self?.store.refresh(force: true) } },
                 onOpenSettings: { [weak self] in self?.openSettings() },
                 onOpenAccounts: { [weak self] in self?.openAccounts() },
                 onQuit: { NSApp.terminate(nil) }

@@ -310,6 +310,36 @@ enum SelfCheck {
             check("opencode.parse", false)
         }
 
+        // OpenCode Zen: balance/monthlyUsage are micro-cents; monthlyLimit is already dollars.
+        let posix = Locale(identifier: "en_US_POSIX")
+        let zenHTML = #"""
+        <!DOCTYPE html><html><body>
+        <script>window.__BILLING__ = { balance:12420811571, monthlyUsage:461288722, monthlyLimit:null }</script>
+        </body></html>
+        """#
+        if let billing = try? OpenCodeZenFetcher.parse(html: zenHTML) {
+            let plan = billing.makePlan()
+            check("opencode.zen.parse.kind", plan.kind == .spend)
+            check("opencode.zen.parse.spent", plan.spent == Decimal(string: "4.61288722", locale: posix))
+            check("opencode.zen.parse.balance", plan.balance?.amount == Decimal(string: "124.20811571", locale: posix))
+            check("opencode.zen.parse.currency", plan.currencyCode == "USD")
+            check("opencode.zen.parse.budget-nil", plan.budget == nil)
+        } else {
+            check("opencode.zen.parse", false)
+        }
+
+        // OpenCode Zen with a monthly limit → budget is that dollar amount (no division).
+        let zenBudgetHTML = #"""
+        <script>balance:10000000000, monthlyUsage:0, monthlyLimit:100</script>
+        """#
+        if let billing = try? OpenCodeZenFetcher.parse(html: zenBudgetHTML) {
+            let plan = billing.makePlan()
+            check("opencode.zen.parse.budget", plan.budget?.amount == Decimal(100))
+            check("opencode.zen.parse.budget-spent", plan.spent == Decimal(0))
+        } else {
+            check("opencode.zen.parse.budget", false)
+        }
+
         // Claude billing: `amount` is cents (decimal string); sum across buckets.
         let claudeBillingJSON = #"""
         {"data":[

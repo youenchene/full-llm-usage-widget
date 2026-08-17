@@ -1,22 +1,28 @@
 import SwiftUI
 
-/// One provider's connection row in the dedicated Accounts panel: shows connection state and
-/// hosts the sign-in flow / sign-out action. Usage rendering lives in the main popover.
+/// One auth method's connection row in the dedicated Accounts panel: shows connection state and
+/// hosts the sign-in flow / sign-out action for that method alone. Multi-method providers render
+/// one row per method (OpenCode Go + Zen; Claude subscription + API key).
 struct ConnectionRow: View {
-    let provider: any UsageProvider
+    let method: AuthMethod
     let store: UsageStore
 
     @State private var continuation: SignInContinuation?
     @State private var flowError: String?
+    @State private var signedIn = false
 
     var body: some View {
-        let signedIn = store.authStates[provider.provider] == .signedIn
-        let error = store.errors[provider.provider]
+        let error = store.errors[method.provider]
 
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(provider.provider.displayName)
-                    .font(.headline)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(method.title)
+                        .font(.headline)
+                    Text(method.instructions)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 statusBadge(signedIn: signedIn)
             }
@@ -26,7 +32,8 @@ struct ConnectionRow: View {
                     continuation: continuation,
                     onFinished: {
                         self.continuation = nil
-                        await store.refresh()
+                        await refreshSignedIn()
+                        await store.refresh(force: true)
                     },
                     onCancel: { self.continuation = nil }
                 )
@@ -41,7 +48,10 @@ struct ConnectionRow: View {
                     }
                     Spacer()
                     Button("Sign out") {
-                        Task { await store.signOut(provider) }
+                        Task {
+                            await store.signOut(method)
+                            await refreshSignedIn()
+                        }
                     }
                 }
             } else {
@@ -62,6 +72,11 @@ struct ConnectionRow: View {
             RoundedRectangle(cornerRadius: DesignTokens.cornerRadius, style: .continuous)
                 .fill(.quaternary.opacity(0.35))
         )
+        .task { await refreshSignedIn() }
+    }
+
+    private func refreshSignedIn() async {
+        signedIn = await method.isSignedIn()
     }
 
     private func statusBadge(signedIn: Bool) -> some View {
@@ -77,10 +92,11 @@ struct ConnectionRow: View {
         flowError = nil
         Task {
             do {
-                let result = try await provider.signIn()
+                let result = try await method.signIn()
                 switch result {
                 case .completed:
-                    await store.refresh()
+                    await refreshSignedIn()
+                    await store.refresh(force: true)
                 default:
                     continuation = result
                 }

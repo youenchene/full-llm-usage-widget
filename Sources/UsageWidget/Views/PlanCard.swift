@@ -58,6 +58,12 @@ private struct SpendSummary: View {
                     .foregroundStyle(.secondary)
             }
 
+            if let balance = plan.balance {
+                Text("\(Formatting.currency(balance.amount, code: balance.currencyCode)) remaining")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
             if let budget = plan.budget, budget.amount > 0, let progress = plan.progress {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
