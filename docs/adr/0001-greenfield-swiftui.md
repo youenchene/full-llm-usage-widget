@@ -1,0 +1,5 @@
+# Greenfield Swift/SwiftUI menu-bar app, not a fork
+
+We need a macOS menu-bar widget tracking LLM usage across eight plans spanning seven providers. Two existing projects cover part of the space — `flukelaster/LLM-Usage-Widget` (Swift 6 / SwiftUI, 3 providers) and `tboydar/show-llm-usage` (bash + single-file AppKit, 12 providers) — but neither matches our provider set. We decided to build greenfield, copying `LLM-Usage-Widget`'s architecture (Provider protocol, `@Observable` store, refresh scheduler, snapshot cache) rather than forking either repository.
+
+**Considered options**: fork `LLM-Usage-Widget` (rejected — its auth layer is built around Claude/Copilot first-party OAuth client IDs we'd delete, and it carries a Windows/.NET build we don't want); fork `show-llm-usage` (rejected — its per-service bash fetchers depend on `opencli` browser scraping and `jq`/`python3`/`tmux`, and we'd inherit eight providers we don't use); greenfield (chosen — roughly half our providers are new, so a clean repo named `Full-LLM-Usage-Widget` with a borrowed-but-owned architecture is the smallest surface that isn't anchored to either project's assumptions).
