@@ -67,6 +67,50 @@ Verify the notarized app:
 spctl --assess --type execute --verbose=4 .build/FullLLMUsageWidget.app
 ```
 
+## GitHub Actions release
+
+`.github/workflows/release.yml` builds a signed + notarized **arm64** `.dmg` and publishes a
+GitHub Release automatically when a PR is merged into `main` — or when a commit is pushed directly
+to `main` (fallback). The merged PR's title + body become the release note, and the `.dmg` is
+attached as the asset.
+
+Add these secrets under **Repository → Settings → Secrets and variables → Actions**:
+
+| Secret | Description | Example |
+|---|---|---|
+| `APPLE_CERTIFICATE` | base64 of the `Developer ID Application` `.p12` (cert + private key) | see below |
+| `APPLE_CERTIFICATE_PASSWORD` | the `.p12` export password | |
+| `APPLE_SIGNING_IDENTITY` | signing identity name (same as local `DEV_ID`) | `Developer ID Application: Name (TEAMID)` |
+| `APPLE_ID` | Apple ID email (notarytool login) | `you@example.com` |
+| `APPLE_TEAM_ID` | Apple Developer team id | `XXXXXXXXXX` |
+| `APPLE_APP_PASSWORD` | app-specific password (same as local `APP_PW`) | `xxxx-xxxx-xxxx-xxxx` |
+
+The last four are the same values you use locally for `./run.sh --release`. `APPLE_CERTIFICATE`
+and `APPLE_CERTIFICATE_PASSWORD` are new — CI needs the cert in the repo's secrets because it
+can't reach your local Keychain.
+
+### Exporting the certificate
+
+Find the identity, export it as a `.p12` (Keychain Access → right-click the identity → Export,
+or `security export`), then base64-encode it for the secret:
+
+```bash
+security find-identity -v -p codesigning        # note the "Developer ID Application: ..." identity
+base64 -i DeveloperIDApplication.p12 | pbcopy   # paste the clipboard into APPLE_CERTIFICATE
+```
+
+### Versioning
+
+The release tag comes from `CFBundleShortVersionString` in `Support/Info.plist`:
+
+| Case | Tag |
+|---|---|
+| First release of a version | `v0.1.0` |
+| Version already released at another commit | `v0.1.0-<shortsha>` |
+| Same commit already released (merge + push double-fire) | skipped |
+
+Bump `CFBundleShortVersionString` in `Support/Info.plist` for clean semantic tags.
+
 ## Scripts
 
 | Script | Purpose |
