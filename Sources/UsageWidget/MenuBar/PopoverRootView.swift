@@ -1,17 +1,19 @@
 import SwiftUI
 
-/// The popover root: a header with refresh/settings/quit actions, an optional error banner, and
-/// one row per *enabled* provider.
+/// The main popover: usage only. Sign-in / sign-out live in the dedicated Accounts panel.
 struct PopoverRootView: View {
     let store: UsageStore
     let providers: [any UsageProvider]
     let settings: SettingsModel
     let onRefresh: () -> Void
     let onOpenSettings: () -> Void
+    let onOpenAccounts: () -> Void
     let onQuit: () -> Void
 
     var body: some View {
         let visibleProviders = providers.filter { settings.isEnabled($0.provider) }
+        let plansByProvider = Dictionary(grouping: store.visiblePlans, by: { $0.provider })
+
         ScrollView {
             VStack(alignment: .leading, spacing: DesignTokens.cardSpacing) {
                 header
@@ -21,7 +23,16 @@ struct PopoverRootView: View {
                         .foregroundStyle(.red)
                 }
                 Divider()
-                ForEach(visibleProviders, id: \.provider) { ProviderRow(provider: $0, store: store) }
+
+                if store.visiblePlans.isEmpty {
+                    emptyState
+                } else {
+                    ForEach(visibleProviders, id: \.provider) { provider in
+                        if let plans = plansByProvider[provider.provider], !plans.isEmpty {
+                            ForEach(plans) { PlanCard(plan: $0, error: store.errors[provider.provider]) }
+                        }
+                    }
+                }
             }
             .padding(16)
             .frame(width: DesignTokens.popoverWidth - 32, alignment: .leading)
@@ -46,6 +57,10 @@ struct PopoverRootView: View {
                     Image(systemName: "arrow.clockwise")
                 }
                 .help("Refresh now")
+                Button(action: onOpenAccounts) {
+                    Image(systemName: "person.crop.circle.badge.plus")
+                }
+                .help("Accounts")
                 Button(action: onOpenSettings) {
                     Image(systemName: "gearshape")
                 }
@@ -57,5 +72,22 @@ struct PopoverRootView: View {
             }
             .buttonStyle(.borderless)
         }
+    }
+
+    private var emptyState: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("No usage yet")
+                .font(.headline)
+            Text("Connect a provider to see live usage here.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button("Manage connections", action: onOpenAccounts)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: DesignTokens.cornerRadius, style: .continuous)
+                .fill(.quaternary.opacity(0.35))
+        )
     }
 }

@@ -45,6 +45,8 @@ struct SettingsView: View {
         Section("Providers") {
             ForEach(Provider.allCases) { provider in
                 Toggle(provider.displayName, isOn: providerBinding(provider))
+                    .toggleStyle(.switch)
+                    .tint(.blue)
             }
         }
     }
@@ -164,6 +166,8 @@ struct SettingsView: View {
     private var launchAtLoginSection: some View {
         Section {
             Toggle("Launch at login", isOn: launchAtLoginBinding)
+                .toggleStyle(.switch)
+                .tint(.blue)
             if let launchAtLoginError {
                 Text(launchAtLoginError)
                     .font(.caption)
