@@ -38,6 +38,8 @@ struct SignInView: View {
                 fieldsFlow(title: title, fields: fields, action: submit)
             case .deviceCode(let userCode, let verificationURL, let instructions, let poll):
                 deviceFlow(userCode: userCode, verificationURL: verificationURL, instructions: instructions, poll: poll)
+            case .needsPermission(let title, let instructions, let openSettings, let retry):
+                permissionFlow(title: title, instructions: instructions, openSettings: openSettings, retry: retry)
             }
 
             HStack {
@@ -176,6 +178,32 @@ struct SignInView: View {
                 submit { try await poll() }
             } label: {
                 Text(isWorking ? "Waiting for authorization…" : "I've entered the code")
+            }
+            .disabled(isWorking)
+        }
+    }
+
+    // MARK: - System-permission flow (Cursor: Full Disk Access)
+
+    private func permissionFlow(
+        title: String,
+        instructions: String,
+        openSettings: (@Sendable () -> Void)?,
+        retry: @escaping @Sendable () async throws -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.caption.bold())
+            Text(instructions).font(.caption).foregroundStyle(.secondary)
+            if let openSettings {
+                Button("Open System Settings") { openSettings() }
+            }
+            if let error {
+                Text(error).font(.caption2).foregroundStyle(.red)
+            }
+            Button {
+                submit { try await retry() }
+            } label: {
+                Text(isWorking ? "Checking…" : "Check access")
             }
             .disabled(isWorking)
         }

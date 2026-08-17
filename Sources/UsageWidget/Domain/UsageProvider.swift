@@ -14,6 +14,9 @@ enum ProviderError: Error, Sendable, Equatable {
     case decoding(String)
     /// An API key/secret was rejected (401/403) — distinct from an expired OAuth token.
     case badCredentials(String)
+    /// A local resource can't be read (e.g. Cursor's database) — typically a missing system
+    /// permission like Full Disk Access, or the app not being installed.
+    case permissionDenied(String)
 }
 
 extension ProviderError: LocalizedError {
@@ -25,6 +28,7 @@ extension ProviderError: LocalizedError {
         case .transport(let message): "Network error: \(message)"
         case .decoding(let message): "Unexpected response: \(message)"
         case .badCredentials(let message): message
+        case .permissionDenied(let message): message
         }
     }
 }
@@ -72,6 +76,14 @@ enum SignInContinuation: Sendable {
     /// Multi-field credential form (e.g. Scaleway's secret key + organization ID). Call
     /// `submit(values)` with the collected values keyed by `SignInField.id`.
     case needsFields(title: String, fields: [SignInField], submit: @Sendable ([String: String]) async throws -> Void)
+    /// A system-permission flow (Cursor needs Full Disk Access): no credential is entered into the
+    /// widget. The user grants the permission in System Settings, then taps retry to verify access.
+    case needsPermission(
+        title: String,
+        instructions: String,
+        openSettings: (@Sendable () -> Void)?,
+        retry: @Sendable () async throws -> Void
+    )
 }
 
 enum ProviderAuthState: Sendable, Equatable {

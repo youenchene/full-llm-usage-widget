@@ -2,5 +2,6 @@
 .swiftpm/
 DerivedData/
 *.app
+dist/
 .DS_Store
 .tmp/

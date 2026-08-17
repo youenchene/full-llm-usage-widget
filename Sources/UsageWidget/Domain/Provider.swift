@@ -12,6 +12,7 @@ enum Provider: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
     case openCode
     case mistral
     case scaleway
+    case cursor
 
     var id: String { rawValue }
 
@@ -24,6 +25,7 @@ enum Provider: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
         case .openCode: "OpenCode"
         case .mistral: "Mistral"
         case .scaleway: "Scaleway"
+        case .cursor: "Cursor"
         }
     }
 }

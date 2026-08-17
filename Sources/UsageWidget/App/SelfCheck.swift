@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import SQLite3
 
 /// In-process self-checks exercised by `run.sh --check` (and the packaged `--check` flag).
 ///
@@ -75,6 +76,7 @@ enum SelfCheck {
         // Settings, thresholds, budgets, focus, and notifications.
         checkSettings(&failures)
         checkNotifications(&failures)
+        checkCursorDatabase(&failures)
 
         print(failures == 0 ? "Self-check OK" : "Self-check FAILED (\(failures) failure(s))")
         return failures == 0 ? 0 : 1
@@ -324,5 +326,96 @@ enum SelfCheck {
         } else {
             check("claude.billing.parse", false)
         }
+
+        // Cursor legacy: fast-request quota (`gpt-4` used/limit + startOfMonth) → monthly window.
+        let cursorLegacyJSON = #"""
+        {"gpt-4":{"numRequests":42,"maxRequestUsage":500},"startOfMonth":"2026-08-01T00:00:00.000Z"}
+        """#
+        if let usage = try? CursorUsageFetcher.parseUsage(Data(cursorLegacyJSON.utf8)) {
+            check("cursor.legacy.used", usage.fastRequestsUsed == 42)
+            check("cursor.legacy.limit", usage.fastRequestsLimit == 500)
+            check("cursor.legacy.window-label", usage.window.label == "monthly")
+            check("cursor.legacy.window-used", usage.window.used == 42)
+            check("cursor.legacy.window-resets", usage.window.resetsAt != nil)
+        } else {
+            check("cursor.legacy.parse", false)
+        }
+
+        // Cursor legacy with no fast-request quota → nil (account is on the credit model).
+        let cursorNoQuotaJSON = #"""
+        {"gpt-4":{"numRequests":900,"maxRequestUsage":null},"startOfMonth":"2026-08-01T00:00:00.000Z"}
+        """#
+        let noQuota = try? CursorUsageFetcher.parseUsage(Data(cursorNoQuotaJSON.utf8))
+        check("cursor.legacy.nil-when-unlimited", noQuota == nil)
+
+        // Cursor credit: totalPercentUsed → monthly window (used percent, limit 100).
+        let cursorCreditJSON = #"""
+        {"billingCycleEnd":"1767225600000","planUsage":{"limit":2000,"remaining":800,"used":1200,"totalPercentUsed":60}}
+        """#
+        if let usage = try? CursorUsageFetcher.parseCredit(Data(cursorCreditJSON.utf8)) {
+            check("cursor.credit.percent", usage.percentUsed == 60)
+            check("cursor.credit.window-limit", usage.window.limit == 100)
+            check("cursor.credit.window-used", usage.window.used == 60)
+            check("cursor.credit.window-resets", usage.window.resetsAt != nil)
+        } else {
+            check("cursor.credit.parse", false)
+        }
+    }
+
+    // MARK: - Cursor local database reader (SQLite round-trip)
+
+    private static func checkCursorDatabase(_ failures: inout Int) {
+        func check(_ name: String, _ condition: Bool) {
+            if condition { print("PASS \(name)") } else { print("FAIL \(name)"); failures += 1 }
+        }
+
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("usage-widget-cursor-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dbURL = dir.appendingPathComponent("state.vscdb")
+        createCursorTestDatabase(at: dbURL)
+
+        do {
+            let token = try CursorStateDB.readString(key: "cursorAuth/accessToken", at: dbURL)
+            let membership = try CursorStateDB.readString(key: "cursorAuth/stripeMembershipType", at: dbURL)
+            let missing = try CursorStateDB.readString(key: "cursorAuth/nonexistent", at: dbURL)
+            check("cursor.db.token", token == "jwt-token-abc")
+            check("cursor.db.membership", membership == "pro")
+            check("cursor.db.missing-key-nil", missing == nil)
+        } catch {
+            print("FAIL cursor.db.read: \(error)")
+            failures += 1
+        }
+
+        // A nonexistent database path → permissionDenied (not a crash).
+        let bogus = dir.appendingPathComponent("does-not-exist.vscdb")
+        do {
+            _ = try CursorStateDB.readString(key: "cursorAuth/accessToken", at: bogus)
+            check("cursor.db.missing-file", false)
+        } catch ProviderError.permissionDenied {
+            check("cursor.db.missing-file", true)
+        } catch {
+            check("cursor.db.missing-file", false)
+        }
+    }
+
+    /// Build a minimal `state.vscdb`-shaped DB (an `ItemTable` key/value store) for the reader test.
+    private static func createCursorTestDatabase(at url: URL) {
+        var db: OpaquePointer?
+        guard sqlite3_open(url.path, &db) == SQLITE_OK, let db else { return }
+        sqlite3_exec(db, "CREATE TABLE IF NOT EXISTS ItemTable (key TEXT PRIMARY KEY, value BLOB);", nil, nil, nil)
+        func insert(_ key: String, _ value: String) {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO ItemTable (key, value) VALUES (?, ?);", -1, &stmt, nil) == SQLITE_OK,
+                  let stmt else { return }
+            key.withCString { sqlite3_bind_text(stmt, 1, $0, -1, CursorStateDB.sqliteTransient) }
+            value.withCString { sqlite3_bind_text(stmt, 2, $0, -1, CursorStateDB.sqliteTransient) }
+            sqlite3_step(stmt)
+            sqlite3_finalize(stmt)
+        }
+        insert("cursorAuth/accessToken", "jwt-token-abc")
+        insert("cursorAuth/stripeMembershipType", "pro")
+        sqlite3_close(db)
     }
 }

@@ -89,7 +89,9 @@ struct SettingsState: Codable, Equatable, Sendable {
     }
 
     static let `default` = SettingsState(
-        enabledProviders: Set(Provider.allCases),
+        // Cursor is opt-in: it reads the user's local Cursor database, which requires Full Disk
+        // Access. Never enable it implicitly (see docs/cursor-full-disk-access.md).
+        enabledProviders: Set(Provider.allCases).subtracting([.cursor]),
         budgets: [:],
         menuBarFocus: .auto,
         thresholds: Thresholds(),

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build → package .app → launch (or `--check` self-check runner).
-# Mirrors the reference LLM-Usage-Widget's run.sh.
+# Build → package .app → launch. Flags: `--check` self-check runner, `--release` to
+# sign + notarize + staple + build a signed .dmg (Developer ID credentials from
+# ~/.config/fllm-signing/notarize.env). Mirrors the reference LLM-Usage-Widget's run.sh.
 
 cd "$(dirname "$0")"
 
@@ -20,6 +21,7 @@ SIGN_CERT="$SIGN_DIR/fllm-signing.cer"
 SIGN_KEY="$SIGN_DIR/fllm-signing.key"
 SIGN_P12="$SIGN_DIR/fllm-signing.p12"
 SIGN_P12_PASSWORD="fllm-signing"   # local-only; the key lives in the Keychain after import
+NOTARIZE_ENV="$SIGN_DIR/notarize.env"   # Developer ID + Apple credentials (git-ignored, outside repo)
 
 # Create the signing identity if it's missing (idempotent). The private key is imported into the
 # login keychain and the on-disk key/p12 copies are removed.
@@ -96,8 +98,30 @@ launch() {
   open "$APP_BUNDLE"
 }
 
+# Sign with the Developer ID, notarize + staple, then wrap in a signed .dmg.
+# Credentials come from ~/.config/fllm-signing/notarize.env (or the environment).
+release() {
+  echo "== release: Developer ID sign + notarize + staple + signed .dmg =="
+  if [[ -f "$NOTARIZE_ENV" ]]; then
+    # shellcheck disable=SC1090
+    source "$NOTARIZE_ENV"
+  fi
+  : "${DEV_ID:?set DEV_ID (Developer ID Application identity)}"
+  : "${APPLE_ID:?set APPLE_ID (Apple ID email)}"
+  : "${TEAM_ID:?set TEAM_ID (Developer team id)}"
+  : "${APP_PW:?set APP_PW (app-specific password)}"
+  export DEV_ID APPLE_ID TEAM_ID APP_PW
+  Scripts/notarize.sh
+  Scripts/release.sh
+}
+
 if [[ "${1:-}" == "--check" ]]; then
   self_check
+  exit 0
+fi
+
+if [[ "${1:-}" == "--release" ]]; then
+  release
   exit 0
 fi
 

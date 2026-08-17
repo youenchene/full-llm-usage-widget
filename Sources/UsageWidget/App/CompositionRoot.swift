@@ -19,12 +19,15 @@ final class CompositionRoot {
             CodexProvider(tokens: credentials),
             CopilotProvider(tokens: credentials),
             ScalewayProvider(secrets: credentials),
-            OpenCodeProvider(secrets: credentials)
+            OpenCodeProvider(secrets: credentials),
+            CursorProvider(secrets: credentials)
             // Mistral is deferred: its usage/billing API (the Admin API) is Enterprise-only,
             // so there's no way to read spend on Pro/Free plans. Re-enable for Enterprise users:
             // MistralProvider(secrets: credentials)
             // Gemini and OpenCode Zen are deferred: no public usage endpoint
             // (see docs/spike-findings.md — private Antigravity backend / console-only SolidStart RPC).
+            // Cursor (Phase 5) reads its local state.vscdb — Full Disk Access, opt-in, disabled by
+            // default (see docs/cursor-full-disk-access.md).
         ]
 
         let poster = UserNotificationPoster()

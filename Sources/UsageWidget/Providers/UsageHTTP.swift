@@ -51,3 +51,13 @@ enum Browser {
         NSWorkspace.shared.open(url)
     }
 }
+
+/// Open the Privacy & Security → Full Disk Access pane in System Settings (used by the Cursor
+/// provider's opt-in flow). Non-isolated so it can be captured in a `@Sendable` continuation.
+enum FullDiskAccess {
+    static let settingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!
+
+    static func openSettings() {
+        NSWorkspace.shared.open(settingsURL)
+    }
+}
