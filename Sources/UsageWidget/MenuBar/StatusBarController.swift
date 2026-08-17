@@ -88,7 +88,7 @@ final class StatusBarController: NSObject {
             return
         }
         let controller = NSHostingController(
-            rootView: SettingsView(settings: settings, store: store)
+            rootView: SettingsView(settings: settings)
         )
         let window = NSWindow(contentViewController: controller)
         window.title = "Settings"

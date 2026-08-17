@@ -8,11 +8,10 @@ struct SpendPlanInfo: Identifiable {
     let currency: String
 }
 
-/// The settings window: spend-plan budgets, menu-bar focus, threshold colors, poll interval, and
-/// launch-at-login. Provider connection lives in the Accounts panel.
+/// The settings window: spend-plan budgets, threshold colors, poll interval, and launch-at-login.
+/// Provider connection lives in the Accounts panel.
 struct SettingsView: View {
     let settings: SettingsModel
-    let store: UsageStore
 
     private let launchAtLogin = LaunchAtLogin()
     @State private var launchAtLoginError: String?
@@ -28,7 +27,6 @@ struct SettingsView: View {
     var body: some View {
         Form {
             budgetsSection
-            menuBarSection
             thresholdsSection
             pollingSection
             launchAtLoginSection
@@ -50,26 +48,6 @@ struct SettingsView: View {
         } footer: {
             Text("A spend plan with no budget shows only its currency figure — no urgency.")
         }
-    }
-
-    // MARK: - Menu bar
-
-    private var menuBarSection: some View {
-        Section("Menu bar") {
-            Picker("Show", selection: focusBinding) {
-                Text("Most urgent plan").tag(MenuBarFocus.auto)
-                ForEach(store.visiblePlans) { plan in
-                    Text(plan.name).tag(MenuBarFocus.pinned(planID: plan.id))
-                }
-            }
-        }
-    }
-
-    private var focusBinding: Binding<MenuBarFocus> {
-        Binding(
-            get: { settings.menuBarFocus },
-            set: { settings.setMenuBarFocus($0) }
-        )
     }
 
     // MARK: - Thresholds
