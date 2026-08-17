@@ -1,17 +1,36 @@
 import SwiftUI
 
-/// Empty popover root for Phase 1. Plan cards slot in here in later phases.
+/// The popover root: a header, an optional error banner, and one row per provider.
 struct PopoverRootView: View {
+    let store: UsageStore
+    let providers: [any UsageProvider]
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Full LLM Usage Widget")
-                .font(.headline)
-            Divider()
-            Text("No providers wired yet (Phase 1 skeleton).")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: DesignTokens.cardSpacing) {
+                header
+                if let globalError = store.globalError {
+                    Text(globalError)
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                }
+                Divider()
+                ForEach(providers, id: \.provider) { ProviderRow(provider: $0, store: store) }
+            }
+            .padding(16)
+            .frame(width: DesignTokens.popoverWidth - 32, alignment: .leading)
         }
-        .padding(16)
-        .frame(width: DesignTokens.popoverWidth - 32, alignment: .leading)
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("LLM Usage")
+                .font(.headline)
+            if let lastUpdatedAt = store.lastUpdatedAt {
+                Text("Updated \(lastUpdatedAt.formatted(date: .omitted, time: .shortened))")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }

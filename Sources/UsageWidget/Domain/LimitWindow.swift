@@ -8,10 +8,13 @@ struct LimitWindow: Identifiable, Codable, Hashable, Sendable {
     let label: String
     let used: Double
     let limit: Double
-    let resetsAt: Date
+    /// When this window rolls over. Optional — a provider may omit it (e.g. an unlimited plan).
+    let resetsAt: Date?
+    /// True for quotas with no cap (shown as "Unlimited" instead of a bar).
+    var unlimited: Bool = false
 
     var id: String { label }
 
-    /// Progress toward this window's limit, normalized 0–1.
-    var progress: Progress { Progress(used: used, limit: limit) }
+    /// Progress toward this window's limit, normalized 0–1. An unlimited window yields no urgency.
+    var progress: Progress { unlimited ? Progress(used: 0, limit: 0) : Progress(used: used, limit: limit) }
 }

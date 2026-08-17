@@ -17,6 +17,9 @@ struct Plan: Identifiable, Codable, Hashable, Sendable {
     /// Spend plans: remaining prepaid `Balance`, and the amount `spent` this period.
     var balance: Balance?
     var spent: Decimal?
+    /// Spend plans: the currency `spent` is denominated in (e.g. "EUR"). Used to label the
+    /// figure when the Plan has no `Balance`/`Budget` to carry a currency code.
+    var currencyCode: String? = nil
 
     /// Spend plans: an optional user-set `Budget` turns the Plan into a Progress percentage.
     var budget: Budget?

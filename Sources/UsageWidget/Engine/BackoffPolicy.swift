@@ -20,6 +20,13 @@ struct BackoffPolicy: Sendable {
         let scaled = initialSeconds * pow(multiplier, Double(max(failures, 0)))
         return .seconds(min(scaled, maxSeconds))
     }
+
+    /// Same as `delay(afterConsecutiveFailures:)`, returned as seconds (for `Date` arithmetic).
+    func delaySeconds(afterConsecutiveFailures failures: Int) -> TimeInterval {
+        let d = delay(afterConsecutiveFailures: failures)
+        let c = d.components
+        return Double(c.seconds) + Double(c.attoseconds) / 1e18
+    }
 }
 
 private extension Duration {
