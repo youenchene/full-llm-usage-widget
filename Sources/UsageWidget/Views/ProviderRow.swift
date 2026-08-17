@@ -11,7 +11,7 @@ struct ProviderRow: View {
     @State private var flowError: String?
 
     var body: some View {
-        let plans = store.plans.filter { $0.provider == provider.provider }
+        let plans = store.visiblePlans.filter { $0.provider == provider.provider }
         let error = store.errors[provider.provider]
         let signedIn = store.authStates[provider.provider] == .signedIn
 

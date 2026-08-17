@@ -14,6 +14,8 @@ final class UsageStore {
     private let providers: [any UsageProvider]
     private let cache: SnapshotCache
     private let backoff = BackoffPolicy.standard
+    private let settings: SettingsModel
+    private let notifier: NearLimitNotifier?
 
     /// Per-provider refresh timing: when it may next be polled, and its recent failure count.
     private struct ProviderState {
@@ -22,15 +24,30 @@ final class UsageStore {
     }
     private var states: [Provider: ProviderState] = [:]
 
-    init(providers: [any UsageProvider], cache: SnapshotCache) {
+    init(
+        providers: [any UsageProvider],
+        cache: SnapshotCache,
+        settings: SettingsModel,
+        notifier: NearLimitNotifier? = nil
+    ) {
         self.providers = providers
         self.cache = cache
+        self.settings = settings
+        self.notifier = notifier
     }
 
-    /// The single most-urgent Plan's `Progress`, for the menu-bar label. Plans without a
-    /// computable Progress (e.g. spend with no Budget) are ignored.
-    var mostUrgentProgress: Progress? {
-        plans.compactMap(\.progress).max()
+    /// The plans the user has enabled, with Budgets applied (so spend plans can render a
+    /// Progress). Disabled providers are hidden and their plans excluded from urgency.
+    var visiblePlans: [Plan] {
+        plans
+            .filter { settings.isEnabled($0.provider) }
+            .map { settings.applyingBudget(to: $0) }
+    }
+
+    /// The menu-bar's single `Progress` under the current focus. Plans without a computable
+    /// Progress (e.g. spend with no Budget) are ignored.
+    var menuBarProgress: Progress? {
+        MenuBarSelection.progress(plans: visiblePlans, focus: settings.menuBarFocus)
     }
 
     /// Restore the last-good `Snapshot` so the widget renders instantly on launch.
@@ -40,7 +57,8 @@ final class UsageStore {
         lastUpdatedAt = snapshot.fetchedAt
     }
 
-    /// Refresh every wired `UsageProvider`, then persist the last-good `Snapshot`.
+    /// Refresh every enabled `UsageProvider`, then persist the last-good `Snapshot` and run the
+    /// near-limit notifier.
     ///
     /// Each provider is gated by its `minimumPollInterval` and an exponential backoff on failure.
     /// A failed provider never clears existing usage — it falls back to the last-good value and
@@ -48,7 +66,7 @@ final class UsageStore {
     func refresh() async {
         let now = Date()
 
-        for provider in providers {
+        for provider in providers where settings.isEnabled(provider.provider) {
             let id = provider.provider
             var state = states[id] ?? ProviderState()
             guard now >= state.nextAllowedAt else { continue }
@@ -70,7 +88,7 @@ final class UsageStore {
         }
 
         // Refresh auth state so the UI can flip between "sign in" and plan cards.
-        for provider in providers {
+        for provider in providers where settings.isEnabled(provider.provider) {
             authStates[provider.provider] = await provider.authState()
         }
 
@@ -81,6 +99,8 @@ final class UsageStore {
         } catch {
             globalError = "Snapshot save failed: \(error.localizedDescription)"
         }
+
+        notifier?.check(plans: visiblePlans, now: now)
     }
 
     /// Merge this provider's freshly-fetched plans into the store by plan `id`.

@@ -3,7 +3,8 @@ import CryptoKit
 
 /// In-process self-checks exercised by `run.sh --check` (and the packaged `--check` flag).
 ///
-/// Phase 2 adds PKCE + per-provider parsing checks; Phase 4 grows this further.
+/// Phase 2 added PKCE + per-provider parsing checks; Phase 4 adds settings round-trip, threshold
+/// classification, budget→progress, notification once-per-cycle, and menu-bar focus selection.
 enum SelfCheck {
     static func run() -> Int32 {
         var failures = 0
@@ -71,9 +72,131 @@ enum SelfCheck {
             failures += 1
         }
 
+        // Settings, thresholds, budgets, focus, and notifications.
+        checkSettings(&failures)
+        checkNotifications(&failures)
+
         print(failures == 0 ? "Self-check OK" : "Self-check FAILED (\(failures) failure(s))")
         return failures == 0 ? 0 : 1
     }
+
+    // MARK: - Settings / thresholds / budget / focus
+
+    private static func checkSettings(_ failures: inout Int) {
+        func check(_ name: String, _ condition: Bool) {
+            if condition { print("PASS \(name)") } else { print("FAIL \(name)"); failures += 1 }
+        }
+
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("usage-widget-settings-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        var state = SettingsState.default
+        state.enabledProviders.remove(.gemini)
+        state.budgets["scaleway"] = Budget(amount: Decimal(50), currencyCode: "EUR")
+        state.menuBarFocus = .pinned(planID: "scaleway")
+        state.thresholds = Thresholds(warning: 0.6, critical: 0.8)
+        state.pollIntervalSeconds = 120
+
+        let store = SettingsStore(directory: dir)
+        do {
+            try store.save(state)
+            let loaded = store.load()
+            check("settings.roundtrip", loaded == state)
+            check("settings.focus-pinned", loaded?.menuBarFocus == .pinned(planID: "scaleway"))
+            check("settings.budget", loaded?.budgets["scaleway"]?.amount == Decimal(50))
+            check("settings.disabled", loaded?.enabledProviders.contains(.gemini) == false)
+        } catch {
+            print("FAIL settings.roundtrip: \(error)")
+            failures += 1
+        }
+
+        // Threshold classification: warning/critical bands and their boundaries.
+        let t = Thresholds(warning: 0.6, critical: 0.8)
+        check("threshold.normal", t.level(for: 0.5) == .normal)
+        check("threshold.warning", t.level(for: 0.7) == .warning)
+        check("threshold.critical", t.level(for: 0.9) == .critical)
+        check("threshold.warning-boundary", t.level(for: 0.6) == .warning)
+        check("threshold.critical-boundary", t.level(for: 0.8) == .critical)
+
+        // Budget → progress (ADR-0002): a spend plan renders progress only with a budget.
+        let unbudgeted = Plan(
+            id: "scaleway", provider: .scaleway, name: "Scaleway", kind: .spend,
+            spent: Decimal(40), currencyCode: "EUR"
+        )
+        check("spend.no-budget-no-progress", unbudgeted.progress == nil)
+
+        var budgeted = unbudgeted
+        budgeted.budget = Budget(amount: Decimal(100), currencyCode: "EUR")
+        check("spend.budget-progress", budgeted.progress?.value == 0.4)
+
+        // Menu-bar focus: auto picks the most-urgent; pinned picks by id.
+        let quota = Plan(
+            id: "claude", provider: .claude, name: "Claude", kind: .quota,
+            limitWindows: [LimitWindow(label: "5h", used: 50, limit: 100, resetsAt: nil)]
+        )
+        let all = [budgeted, quota]
+        check("focus.auto-max", MenuBarSelection.progress(plans: all, focus: .auto) == quota.progress)
+        check("focus.pinned", MenuBarSelection.progress(plans: all, focus: .pinned(planID: "scaleway")) == budgeted.progress)
+        check("focus.pinned-missing", MenuBarSelection.progress(plans: all, focus: .pinned(planID: "nope")) == nil)
+    }
+
+    // MARK: - Near-limit notifications (once per window/reset cycle)
+
+    private static func checkNotifications(_ failures: inout Int) {
+        func check(_ name: String, _ condition: Bool) {
+            if condition { print("PASS \(name)") } else { print("FAIL \(name)"); failures += 1 }
+        }
+
+        final class RecordingPoster: NotificationPosting {
+            var count = 0
+            func post(title: String, body: String) { count += 1 }
+        }
+
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("usage-widget-notify-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let reset = Date(timeIntervalSince1970: 1_752_000_000)
+        let now = Date(timeIntervalSince1970: 1_750_000_000)
+        let nearLimit = Plan(
+            id: "claude", provider: .claude, name: "Claude", kind: .quota,
+            limitWindows: [LimitWindow(label: "5h", used: 92, limit: 100, resetsAt: reset)]
+        )
+        let safe = Plan(
+            id: "codex", provider: .codex, name: "Codex", kind: .quota,
+            limitWindows: [LimitWindow(label: "5h", used: 20, limit: 100, resetsAt: reset)]
+        )
+
+        let poster = RecordingPoster()
+        let notifier = NearLimitNotifier(poster: poster, store: NotificationCycleStore(directory: dir))
+
+        notifier.check(plans: [safe], now: now)
+        check("notify.below-threshold-silent", poster.count == 0)
+
+        notifier.check(plans: [nearLimit], now: now)
+        check("notify.crosses-once", poster.count == 1)
+
+        notifier.check(plans: [nearLimit], now: now)
+        check("notify.once-per-cycle", poster.count == 1)
+
+        // A fresh notifier (simulating a relaunch) re-loads the persisted key and stays silent.
+        let poster2 = RecordingPoster()
+        let relaunched = NearLimitNotifier(poster: poster2, store: NotificationCycleStore(directory: dir))
+        relaunched.check(plans: [nearLimit], now: now)
+        check("notify.persisted-across-relaunch", poster2.count == 0)
+
+        // A new reset window re-arms the notification.
+        let nextReset = Date(timeIntervalSince1970: 1_752_100_000)
+        let nextCycle = Plan(
+            id: "claude", provider: .claude, name: "Claude", kind: .quota,
+            limitWindows: [LimitWindow(label: "5h", used: 95, limit: 100, resetsAt: nextReset)]
+        )
+        notifier.check(plans: [nextCycle], now: now)
+        check("notify.new-cycle-again", poster.count == 2)
+    }
+
+    // MARK: - Provider parsing
 
     private static func checkParsing(_ failures: inout Int) {
         func check(_ name: String, _ condition: Bool) {

@@ -44,6 +44,8 @@ struct PlanCard: View {
 private struct SpendSummary: View {
     let plan: Plan
 
+    @Environment(\.thresholds) private var thresholds
+
     var body: some View {
         let code = plan.currencyCode ?? "USD"
         VStack(alignment: .leading, spacing: 6) {
@@ -61,7 +63,7 @@ private struct SpendSummary: View {
                     ZStack(alignment: .leading) {
                         Capsule().fill(.quaternary)
                         Capsule()
-                            .fill(DesignTokens.progressColor(progress.value))
+                            .fill(DesignTokens.progressColor(progress.value, thresholds: thresholds))
                             .frame(width: max(geo.size.width * progress.value, 4))
                     }
                 }

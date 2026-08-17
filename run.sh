@@ -28,6 +28,10 @@ build_app() {
   mkdir -p "$APP_BUNDLE/Contents/MacOS"
   cp "$BIN_DIR/$EXECUTABLE" "$APP_BUNDLE/Contents/MacOS/$EXECUTABLE"
   cp "Support/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
+  if [[ -f "Support/AppIcon.icns" ]]; then
+    mkdir -p "$APP_BUNDLE/Contents/Resources"
+    cp "Support/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
+  fi
   echo "Packaged $APP_BUNDLE"
 }
 

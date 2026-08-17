@@ -10,6 +10,8 @@
 	<string>com.micrix.full-llm-usage-widget</string>
 	<key>CFBundleExecutable</key>
 	<string>UsageWidget</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

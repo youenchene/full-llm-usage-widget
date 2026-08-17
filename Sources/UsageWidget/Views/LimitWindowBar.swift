@@ -5,6 +5,8 @@ import SwiftUI
 struct LimitWindowBar: View {
     let window: LimitWindow
 
+    @Environment(\.thresholds) private var thresholds
+
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
@@ -20,7 +22,7 @@ struct LimitWindowBar: View {
                     ZStack(alignment: .leading) {
                         Capsule().fill(.quaternary)
                         Capsule()
-                            .fill(DesignTokens.progressColor(window.progress.value))
+                            .fill(DesignTokens.progressColor(window.progress.value, thresholds: thresholds))
                             .frame(width: max(geo.size.width * window.progress.value, 4))
                     }
                 }

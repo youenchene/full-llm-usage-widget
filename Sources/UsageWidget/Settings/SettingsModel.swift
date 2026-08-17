@@ -1,10 +1,79 @@
 import Foundation
 import Observation
 
-/// User-facing settings. Populated in Phase 4 (enable/disable providers, budgets,
-/// menu-bar focus, thresholds, poll interval, launch-at-login via SMAppService).
+/// The observable settings model. Wraps a persisted `SettingsState` and exposes mutation methods;
+/// SwiftUI views observe reads and update when a setting changes.
 @MainActor
 @Observable
 final class SettingsModel {
-    var pollInterval: Duration = .seconds(300)
+    /// App-wide shared instance (the app has exactly one settings object).
+    static let shared = SettingsModel(store: SettingsStore(bundleIdentifier: AppInfo.bundleIdentifier))
+
+    private let store: SettingsStore
+    private(set) var value: SettingsState
+
+    init(store: SettingsStore) {
+        self.store = store
+        self.value = store.load() ?? .default
+    }
+
+    // MARK: - Read accessors
+
+    var enabledProviders: Set<Provider> { value.enabledProviders }
+    var budgets: [String: Budget] { value.budgets }
+    var menuBarFocus: MenuBarFocus { value.menuBarFocus }
+    var thresholds: Thresholds { value.thresholds }
+    var pollInterval: Duration { .seconds(value.pollIntervalSeconds) }
+
+    func isEnabled(_ provider: Provider) -> Bool { value.enabledProviders.contains(provider) }
+    func budget(for planID: String) -> Budget? { value.budgets[planID] }
+
+    /// Apply the user's Budget (if any) to a spend Plan so it can render a Progress (ADR-0002).
+    func applyingBudget(to plan: Plan) -> Plan {
+        guard plan.kind == .spend else { return plan }
+        var copy = plan
+        copy.budget = value.budgets[plan.id]
+        return copy
+    }
+
+    // MARK: - Mutations (each persists the change)
+
+    func setEnabled(_ enabled: Bool, for provider: Provider) {
+        commit {
+            if enabled { $0.enabledProviders.insert(provider) }
+            else { $0.enabledProviders.remove(provider) }
+        }
+    }
+
+    /// Set or clear a monthly Budget for a spend plan. A nil/zero amount clears it (no urgency).
+    func setBudget(_ amount: Decimal?, currencyCode: String, for planID: String) {
+        commit {
+            if let amount, amount > 0 {
+                $0.budgets[planID] = Budget(amount: amount, currencyCode: currencyCode)
+            } else {
+                $0.budgets.removeValue(forKey: planID)
+            }
+        }
+    }
+
+    func setMenuBarFocus(_ focus: MenuBarFocus) {
+        commit { $0.menuBarFocus = focus }
+    }
+
+    func setThresholds(_ thresholds: Thresholds) {
+        commit { $0.thresholds = thresholds }
+    }
+
+    func setPollIntervalSeconds(_ seconds: Double) {
+        commit { $0.pollIntervalSeconds = seconds }
+    }
+
+    // MARK: - Persistence
+
+    private func commit(_ transform: (inout SettingsState) -> Void) {
+        var next = value
+        transform(&next)
+        value = next
+        try? store.save(next)
+    }
 }
