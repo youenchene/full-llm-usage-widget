@@ -34,7 +34,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0 # full history + tags, for versioning, release notes, and dedupe
 
@@ -111,6 +111,32 @@ jobs:
           echo "Releasing ${TAG}"
           cat release-notes.md
 
+      # Fail fast with a clear per-secret message if any required secret is missing or
+      # misnamed. GitHub separates Secrets from Variables — only `secrets.*` are read here,
+      # so a value stored under the "Variables" tab will show up as missing below.
+      - name: Validate secrets
+        if: steps.meta.outputs.skip != 'true'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          missing=""
+          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
+                   APPLE_ID APPLE_TEAM_ID APPLE_APP_PASSWORD; do
+            if [[ -z "${!v}" ]]; then
+              missing="${missing} ${v}"
+            fi
+          done
+          if [[ -n "${missing}" ]]; then
+            echo "::error::These secrets are empty or not set (add them under Settings → Secrets and variables → Actions → Secrets):${missing}"
+            exit 1
+          fi
+          echo "All required secrets are present."
+
       # Import the "Developer ID Application" certificate into a temporary keychain so
       # codesign / notarytool can run non-interactively.
       - name: Set up signing keychain
@@ -163,7 +189,7 @@ jobs:
 
       - name: Create GitHub Release
         if: steps.meta.outputs.skip != 'true'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
           name: ${{ steps.meta.outputs.title }}
