@@ -52,23 +52,27 @@ final class UsageStore {
         MenuBarSelection.progress(plans: visiblePlans, focus: settings.menuBarFocus)
     }
 
-    /// Total EUR spent across spend plans (non-EUR converted via the cached rate). nil when there's
-    /// no spend data, or when no exchange rate is available to convert non-EUR amounts.
-    var totalSpentEUR: Decimal? {
+    /// Total spend across spend plans, in the user's chosen display currency. nil when there's no
+    /// spend data, or when no exchange rate is available to convert cross-currency amounts.
+    var totalSpend: Decimal? {
         guard let eurPerUSD = rates.eurPerUSD else { return nil }
+        let target = settings.displayCurrency.rawValue
         var total = Decimal(0)
         var any = false
         for plan in visiblePlans where plan.kind == .spend {
             guard let spent = plan.spent,
-                  let eur = CurrencyMath.toEUR(
-                    amount: spent, code: plan.currencyCode ?? "USD", eurPerUSD: eurPerUSD
+                  let converted = CurrencyMath.convert(
+                    spent, from: plan.currencyCode ?? "USD", to: target, eurPerUSD: eurPerUSD
                   )
             else { continue }
-            total += eur
+            total += converted
             any = true
         }
         return any ? total : nil
     }
+
+    /// The currency the menu-bar total is displayed in (the user's chosen display currency).
+    var displayCurrency: DisplayCurrency { settings.displayCurrency }
 
     /// Average percentage (0–1) across quota plans, for the menu-bar's second line.
     var averageQuotaProgress: Progress? {

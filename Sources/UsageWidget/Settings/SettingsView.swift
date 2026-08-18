@@ -27,6 +27,7 @@ struct SettingsView: View {
     var body: some View {
         Form {
             budgetsSection
+            currencySection
             thresholdsSection
             pollingSection
             launchAtLoginSection
@@ -48,6 +49,27 @@ struct SettingsView: View {
         } footer: {
             Text("A spend plan with no budget shows only its currency figure — no urgency.")
         }
+    }
+
+    // MARK: - Currency
+
+    private var currencySection: some View {
+        Section {
+            Picker("Menu bar currency", selection: currencyBinding) {
+                Text("Euro (€)").tag(DisplayCurrency.eur)
+                Text("US Dollar ($)").tag(DisplayCurrency.usd)
+            }
+            .pickerStyle(.segmented)
+        } footer: {
+            Text("Currency the menu-bar API-spend total is shown in.")
+        }
+    }
+
+    private var currencyBinding: Binding<DisplayCurrency> {
+        Binding(
+            get: { settings.displayCurrency },
+            set: { settings.setDisplayCurrency($0) }
+        )
     }
 
     // MARK: - Thresholds

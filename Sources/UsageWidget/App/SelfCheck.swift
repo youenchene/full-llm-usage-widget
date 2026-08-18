@@ -100,6 +100,7 @@ enum SelfCheck {
         state.thresholds = Thresholds(warning: 0.6, critical: 0.8)
         state.pollIntervalSeconds = 120
         state.providerOrder = [.scaleway, .openCode, .claude, .codex, .copilot, .gemini, .mistral]
+        state.displayCurrency = .usd
 
         let store = SettingsStore(directory: dir)
         do {
@@ -109,6 +110,7 @@ enum SelfCheck {
             check("settings.focus-pinned", loaded?.menuBarFocus == .pinned(planID: "scaleway"))
             check("settings.budget", loaded?.budgets["scaleway"]?.amount == Decimal(50))
             check("settings.provider-order", loaded?.providerOrder.first == .scaleway)
+            check("settings.currency", loaded?.displayCurrency == .usd)
         } catch {
             print("FAIL settings.roundtrip: \(error)")
             failures += 1
@@ -209,10 +211,18 @@ enum SelfCheck {
         let posix = Locale(identifier: "en_US_POSIX")
         let rate = Decimal(string: "0.9", locale: posix)!
 
-        // Conversion: EUR passes through unchanged; USD converts; unknown currencies are skipped.
-        check("currency.eur-identity", CurrencyMath.toEUR(amount: Decimal(10), code: "EUR", eurPerUSD: rate) == Decimal(10))
-        check("currency.usd-to-eur", CurrencyMath.toEUR(amount: Decimal(10), code: "USD", eurPerUSD: rate) == Decimal(9))
-        check("currency.unknown-nil", CurrencyMath.toEUR(amount: Decimal(10), code: "GBP", eurPerUSD: rate) == nil)
+        // Conversion: identity passes through; USD↔EUR converts; unknown currencies are skipped.
+        check("currency.eur-identity", CurrencyMath.convert(Decimal(10), from: "EUR", to: "EUR", eurPerUSD: rate) == Decimal(10))
+        check("currency.usd-identity", CurrencyMath.convert(Decimal(10), from: "USD", to: "USD", eurPerUSD: rate) == Decimal(10))
+        check("currency.usd-to-eur", CurrencyMath.convert(Decimal(10), from: "USD", to: "EUR", eurPerUSD: rate) == Decimal(9))
+        check("currency.eur-to-usd", CurrencyMath.convert(Decimal(9), from: "EUR", to: "USD", eurPerUSD: rate) == Decimal(10))
+        check("currency.unknown-nil", CurrencyMath.convert(Decimal(10), from: "GBP", to: "EUR", eurPerUSD: rate) == nil)
+
+        // Compact currency: cents are dropped once the amount exceeds 100.
+        let big = Formatting.compactCurrency(Decimal(123.45), code: "EUR")
+        let small = Formatting.compactCurrency(Decimal(12.34), code: "EUR")
+        check("format.compact-big-no-cents", !big.contains(".") && !big.contains(","))
+        check("format.compact-small-has-cents", small.contains(".") || small.contains(","))
 
         // Exchange rate parse (Frankfurter shape: base USD, rates.EUR).
         let frankfurter = #"{"amount":1.0,"base":"USD","date":"2026-08-17","rates":{"EUR":0.9212}}"#

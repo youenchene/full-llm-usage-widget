@@ -9,7 +9,7 @@ import SwiftUI
 struct MenuBarSpendLabel: View {
     let store: UsageStore
 
-    private var euroFont: Font {
+    private var amountFont: Font {
         .system(size: 9, weight: .regular, design: .monospaced).monospacedDigit()
     }
     private var planFont: Font {
@@ -19,11 +19,11 @@ struct MenuBarSpendLabel: View {
 
     var body: some View {
         Group {
-            if store.totalSpentEUR != nil || store.averageQuotaProgress != nil {
+            if store.totalSpend != nil || store.averageQuotaProgress != nil {
                 VStack(alignment: .leading, spacing: 0) {
-                    if let totalEUR = store.totalSpentEUR {
-                        Text(Formatting.currency(totalEUR, code: "EUR"))
-                            .font(euroFont)
+                    if let total = store.totalSpend {
+                        Text("api \(Formatting.compactCurrency(total, code: store.displayCurrency.rawValue))")
+                            .font(amountFont)
                     }
                     if let average = store.averageQuotaProgress {
                         Text("plan \(Formatting.percent(average.value))")

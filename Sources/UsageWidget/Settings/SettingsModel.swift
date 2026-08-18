@@ -23,6 +23,7 @@ final class SettingsModel {
     var menuBarFocus: MenuBarFocus { value.menuBarFocus }
     var thresholds: Thresholds { value.thresholds }
     var pollInterval: Duration { .seconds(value.pollIntervalSeconds) }
+    var displayCurrency: DisplayCurrency { value.displayCurrency }
 
     /// Display order of providers, with any not-yet-recorded providers appended in canonical
     /// order (so a newly-added provider shows up instead of being silently dropped).
@@ -57,6 +58,10 @@ final class SettingsModel {
 
     func setMenuBarFocus(_ focus: MenuBarFocus) {
         commit { $0.menuBarFocus = focus }
+    }
+
+    func setDisplayCurrency(_ currency: DisplayCurrency) {
+        commit { $0.displayCurrency = currency }
     }
 
     func setThresholds(_ thresholds: Thresholds) {

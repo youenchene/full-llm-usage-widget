@@ -56,6 +56,12 @@ extension MenuBarFocus: Codable {
     }
 }
 
+/// The currency the menu-bar €/＄ total is displayed in.
+enum DisplayCurrency: String, Codable, CaseIterable, Hashable, Sendable {
+    case usd = "USD"
+    case eur = "EUR"
+}
+
 /// The persisted user settings. Every field has a default so an absent value decodes cleanly.
 struct SettingsState: Codable, Equatable, Sendable {
     /// Per-plan monthly Budgets, keyed by spend plan id. An unset budget means "no urgency".
@@ -69,19 +75,23 @@ struct SettingsState: Codable, Equatable, Sendable {
     /// Display order of providers on the main tab. Providers not listed here (e.g. newly added)
     /// are appended in canonical order at render time.
     var providerOrder: [Provider]
+    /// Currency the menu-bar total is shown in (USD or EUR).
+    var displayCurrency: DisplayCurrency
 
     init(
         budgets: [String: Budget],
         menuBarFocus: MenuBarFocus,
         thresholds: Thresholds,
         pollIntervalSeconds: Double,
-        providerOrder: [Provider]
+        providerOrder: [Provider],
+        displayCurrency: DisplayCurrency
     ) {
         self.budgets = budgets
         self.menuBarFocus = menuBarFocus
         self.thresholds = thresholds
         self.pollIntervalSeconds = pollIntervalSeconds
         self.providerOrder = providerOrder
+        self.displayCurrency = displayCurrency
     }
 
     static let `default` = SettingsState(
@@ -89,15 +99,16 @@ struct SettingsState: Codable, Equatable, Sendable {
         menuBarFocus: .auto,
         thresholds: Thresholds(),
         pollIntervalSeconds: 60,
-        providerOrder: Provider.allCases
+        providerOrder: Provider.allCases,
+        displayCurrency: .eur
     )
 
     private enum CodingKeys: String, CodingKey {
-        case budgets, menuBarFocus, thresholds, pollIntervalSeconds, providerOrder
+        case budgets, menuBarFocus, thresholds, pollIntervalSeconds, providerOrder, displayCurrency
     }
 
-    /// Decode with a graceful fallback for `providerOrder`, so a `settings.json` written before
-    /// reordering existed still loads instead of resetting every setting to defaults.
+    /// Decode with a graceful fallback for `providerOrder` and `displayCurrency`, so a
+    /// `settings.json` written before those existed still loads instead of resetting every setting.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.budgets = try container.decode([String: Budget].self, forKey: .budgets)
@@ -106,5 +117,7 @@ struct SettingsState: Codable, Equatable, Sendable {
         self.pollIntervalSeconds = try container.decode(Double.self, forKey: .pollIntervalSeconds)
         self.providerOrder = try container.decodeIfPresent([Provider].self, forKey: .providerOrder)
             ?? Provider.allCases
+        self.displayCurrency = try container.decodeIfPresent(DisplayCurrency.self, forKey: .displayCurrency)
+            ?? .eur
     }
 }

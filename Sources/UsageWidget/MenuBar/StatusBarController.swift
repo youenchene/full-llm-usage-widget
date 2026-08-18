@@ -68,7 +68,8 @@ final class StatusBarController: NSObject {
     /// Re-run whenever the label's inputs change so the status item width stays in sync.
     private func observe() {
         withObservationTracking {
-            _ = store.totalSpentEUR
+            _ = store.totalSpend
+            _ = store.averageQuotaProgress
             _ = store.menuBarProgress
         } onChange: { [weak self] in
             Task { @MainActor in

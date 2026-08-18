@@ -10,15 +10,20 @@ struct ExchangeRate: Codable, Hashable, Sendable {
     let fetchedAt: Date
 }
 
-/// Pure currency math for normalizing spend into EUR.
+/// Pure currency math for normalizing spend between USD and EUR.
 enum CurrencyMath {
-    /// Convert an amount in `code` into EUR using `eurPerUSD`. Returns nil for a currency we
-    /// can't convert, so the caller can skip it rather than fabricate a euro figure.
-    static func toEUR(amount: Decimal, code: String, eurPerUSD: Decimal) -> Decimal? {
-        switch code.uppercased() {
-        case "EUR": return amount
-        case "USD": return amount * eurPerUSD
-        default: return nil
+    /// Convert an amount in `code` into `target` using `eurPerUSD` (EUR per 1 USD). Returns nil
+    /// for a currency we can't convert, so the caller can skip it rather than fabricate a figure.
+    static func convert(_ amount: Decimal, from code: String, to target: String, eurPerUSD: Decimal) -> Decimal? {
+        switch (code.uppercased(), target.uppercased()) {
+        case ("EUR", "EUR"), ("USD", "USD"):
+            return amount
+        case ("USD", "EUR"):
+            return amount * eurPerUSD
+        case ("EUR", "USD"):
+            return amount / eurPerUSD
+        default:
+            return nil
         }
     }
 }
