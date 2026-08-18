@@ -69,6 +69,7 @@ struct OpenCodeProvider: UsageProvider {
                     guard !workspace.isEmpty, !cookie.isEmpty else { throw OAuthError.invalidResponse }
                     await secrets.saveSecret(workspace, for: Self.zenWorkspaceAccount)
                     await secrets.saveSecret(cookie, for: Self.zenCookieAccount)
+                    return nil
                 }
             },
             signOut: {

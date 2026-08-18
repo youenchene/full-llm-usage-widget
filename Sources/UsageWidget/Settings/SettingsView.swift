@@ -21,7 +21,8 @@ struct SettingsView: View {
         SpendPlanInfo(id: "mistral", name: "Mistral", currency: "EUR"),
         SpendPlanInfo(id: "scaleway", name: "Scaleway", currency: "EUR"),
         SpendPlanInfo(id: "claude.api", name: "Claude API", currency: "USD"),
-        SpendPlanInfo(id: "opencode.zen", name: "OpenCode Zen", currency: "USD")
+        SpendPlanInfo(id: "opencode.zen", name: "OpenCode Zen", currency: "USD"),
+        SpendPlanInfo(id: "gemini.gcp", name: "Gemini (GCP)", currency: "USD")
     ]
 
     var body: some View {

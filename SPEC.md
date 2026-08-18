@@ -17,7 +17,7 @@ Eight plans across seven providers:
 | Claude | quota | 5h + weekly | OAuth paste-code → `api.anthropic.com/api/oauth/usage` | High |
 | Codex | quota | 5h + weekly | OAuth browser → `chatgpt.com/backend-api/wham/usage` | High |
 | Copilot | quota | monthly premium requests | GitHub device flow → `api.github.com/copilot_internal/user` | High |
-| Gemini | quota | rate-limit / quota | API key → AI Studio / Antigravity | Low |
+| Gemini | spend (opt-in) | current-month billed spend | service account → BigQuery billing export | Medium |
 | OpenCode Go | quota | $12/5h · $30/wk · $60/mo | API key / console → `opencode.ai/auth` | Medium |
 | Mistral | spend | € | admin API key → `api.mistral.ai/v1/admin/usage` | High |
 | Scaleway | spend | € | secret key (`X-Auth-Token`) → Billing API | Medium |
@@ -27,6 +27,7 @@ Eight plans across seven providers:
 
 - **Cursor** — no public usage API; would need Full Disk Access to read its local SQLite, or a dashboard scrape. Deliberately deferred.
 - **Notarization** — the user has a signing setup; defer until distribution beyond the user's own Mac.
+- **Gemini quota mode** — the AI Studio / Antigravity rate-limit plan has no public usage endpoint (see `docs/spike-findings.md`). Gemini today connects only via the optional **Actual billed spend (GCP)** mode (`docs/gemini-gcp-billing.md`): a spend Plan queried from the Cloud Billing export in BigQuery.
 
 ## Domain model
 

@@ -58,6 +58,23 @@ struct SignInField: Sendable, Identifiable {
     }
 }
 
+/// One selectable option in a discovery-selection step (e.g. a `service.description` the user
+/// identifies as Gemini-related in their own billing export).
+struct SelectionOption: Sendable, Identifiable {
+    /// Stable value submitted back to the provider (e.g. the service description).
+    let id: String
+    /// What the user sees (usually the same as `id`).
+    let label: String
+    /// Optional supporting detail (e.g. the cost attributed to this option).
+    let detail: String?
+
+    init(id: String, label: String, detail: String? = nil) {
+        self.id = id
+        self.label = label
+        self.detail = detail
+    }
+}
+
 /// How a sign-in flow proceeds after it begins. Different providers need different UX:
 /// Codex completes autonomously via a loopback redirect; Claude needs the user to paste a code;
 /// Copilot uses the GitHub device flow; Mistral accepts a pasted admin API key.
@@ -74,8 +91,14 @@ enum SignInContinuation: Sendable {
     /// API-key flow: prompt for a pasted key and call `submit(key)`. Used by Mistral.
     case needsKey(instructions: String, submit: @Sendable (String) async throws -> Void)
     /// Multi-field credential form (e.g. Scaleway's secret key + organization ID). Call
-    /// `submit(values)` with the collected values keyed by `SignInField.id`.
-    case needsFields(title: String, fields: [SignInField], submit: @Sendable ([String: String]) async throws -> Void)
+    /// `submit(values)` with the collected values keyed by `SignInField.id`. The submit may
+    /// return a follow-up `SignInContinuation` (e.g. Gemini runs a discovery query and then asks
+    /// the user to select the relevant services); `nil` finishes the flow.
+    case needsFields(title: String, fields: [SignInField], submit: @Sendable ([String: String]) async throws -> SignInContinuation?)
+    /// Discovery-selection step: the provider ran a discovery query and needs the user to pick
+    /// which options are relevant (e.g. the Gemini-related `service` rows in a billing export).
+    /// Call `submit(selectedIDs)` with the chosen `SelectionOption.id`s.
+    case needsSelection(title: String, instructions: String, options: [SelectionOption], submit: @Sendable ([String]) async throws -> Void)
     /// A system-permission flow (Cursor needs Full Disk Access): no credential is entered into the
     /// widget. The user grants the permission in System Settings, then taps retry to verify access.
     case needsPermission(

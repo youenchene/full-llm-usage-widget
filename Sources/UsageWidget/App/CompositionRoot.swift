@@ -21,12 +21,15 @@ final class CompositionRoot {
             CopilotProvider(tokens: credentials),
             ScalewayProvider(secrets: credentials),
             OpenCodeProvider(secrets: credentials),
+            GeminiProvider(secrets: credentials, settings: settings),
+            MistralProvider(secrets: credentials),
             CursorProvider(secrets: credentials)
-            // Mistral is deferred: its usage/billing API (the Admin API) is Enterprise-only,
-            // so there's no way to read spend on Pro/Free plans. Re-enable for Enterprise users:
-            // MistralProvider(secrets: credentials)
-            // Gemini is deferred: no public usage endpoint (see docs/spike-findings.md — private
-            // Antigravity backend). OpenCode Zen now ships inside OpenCodeProvider (two Plans).
+            // Mistral: two auth methods — an admin API key (spend, Enterprise only) and a console
+            // session cookie (included monthly usage quota, any plan; see
+            // docs/mistral-console-scrape.md).
+            // Gemini's quota mode (AI Studio / Antigravity) is deferred: no public usage endpoint
+            // (see docs/spike-findings.md). The GCP billing-export spend mode above is the only
+            // Gemini connection today (see docs/gemini-gcp-billing.md).
             // Cursor (Phase 5) reads its local state.vscdb — Full Disk Access, opt-in, disabled by
             // default (see docs/cursor-full-disk-access.md).
         ]

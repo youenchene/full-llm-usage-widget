@@ -26,6 +26,18 @@ struct PlanCard: View {
                 SpendSummary(plan: plan)
             }
 
+            if let note = plan.note {
+                Text(note)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let fetchedAt = plan.fetchedAt {
+                Text(freshnessLabel(fetchedAt))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
             if let error {
                 Text(error)
                     .font(.caption2)
@@ -37,6 +49,25 @@ struct PlanCard: View {
             RoundedRectangle(cornerRadius: DesignTokens.cornerRadius, style: .continuous)
                 .fill(.quaternary.opacity(0.35))
         )
+    }
+
+    /// "Updated 5m ago", flipping to a "Stale —" prefix once the data is older than
+    /// `staleThreshold` (billing-export data is expected to refresh at least daily).
+    private static let staleThreshold: TimeInterval = 6 * 60 * 60
+
+    private func freshnessLabel(_ date: Date) -> String {
+        let interval = Date().timeIntervalSince(date)
+        let prefix = interval > Self.staleThreshold ? "Stale — " : ""
+        return "\(prefix)Updated \(Self.relative(interval))"
+    }
+
+    private static func relative(_ interval: TimeInterval) -> String {
+        let minutes = Int(interval / 60)
+        if minutes < 1 { return "just now" }
+        if minutes < 60 { return "\(minutes)m ago" }
+        let hours = minutes / 60
+        if hours < 24 { return "\(hours)h ago" }
+        return "\(hours / 24)d ago"
     }
 }
 

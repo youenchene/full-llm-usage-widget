@@ -39,6 +39,7 @@ struct ScalewayProvider: UsageProvider {
             guard !key.isEmpty, !org.isEmpty else { throw OAuthError.invalidResponse }
             await secrets.saveSecret(key, for: Self.keyAccount)
             await secrets.saveSecret(org, for: Self.orgAccount)
+            return nil
         }
     }
 

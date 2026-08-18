@@ -78,6 +78,7 @@ enum SelfCheck {
         checkNotifications(&failures)
         checkCursorDatabase(&failures)
         checkCurrency(&failures)
+        checkGeminiGCP(&failures)
 
         print(failures == 0 ? "Self-check OK" : "Self-check FAILED (\(failures) failure(s))")
         return failures == 0 ? 0 : 1
@@ -269,6 +270,204 @@ enum SelfCheck {
         check("quota.average-ignores-spend", MenuBarSelection.averageQuotaProgress(plans: [go, spend])?.value == 0.4)
     }
 
+    // MARK: - Gemini GCP billing export (BigQuery)
+
+    private static func checkGeminiGCP(_ failures: inout Int) {
+        func check(_ name: String, _ condition: Bool) {
+            if condition { print("PASS \(name)") } else { print("FAIL \(name)"); failures += 1 }
+        }
+
+        let posix = Locale(identifier: "en_US_POSIX")
+
+        // Billing row aggregation: gross cost + credits, exact decimal arithmetic.
+        let spendJSON = #"""
+        {"kind":"bigquery#queryResponse","jobComplete":true,
+         "rows":[{"f":[{"v":"12.34"},{"v":"-1.25"},{"v":"USD"},{"v":"1"}]}],"totalRows":"1"}
+        """#
+        do {
+            let result = try GeminiGCPFetcher.parseQueryResponse(Data(spendJSON.utf8))
+            let usage = try GeminiGCPFetcher.parseSpend(result)
+            let plan = usage.plans.first
+            check("gemini.gcp.parse.spent", plan?.spent == Decimal(string: "11.09", locale: posix))
+            check("gemini.gcp.parse.currency", plan?.currencyCode == "USD")
+            check("gemini.gcp.parse.kind", plan?.kind == .spend)
+            check("gemini.gcp.parse.note", plan?.note == GeminiGCPFetcher.estimateNote)
+            check("gemini.gcp.parse.fetchedAt", plan?.fetchedAt != nil)
+        } catch {
+            check("gemini.gcp.parse.spent", false)
+        }
+
+        // No rows → zero spend (not an error).
+        do {
+            let empty = try GeminiGCPFetcher.parseQueryResponse(Data(#"{"jobComplete":true}"#.utf8))
+            let usage = try GeminiGCPFetcher.parseSpend(empty)
+            check("gemini.gcp.parse.empty-zero", usage.plans.first?.spent == Decimal(0))
+        } catch {
+            check("gemini.gcp.parse.empty-zero", false)
+        }
+
+        // Mixed currencies are rejected (cannot aggregate across currencies).
+        let mixedJSON = #"""
+        {"jobComplete":true,"rows":[{"f":[{"v":"12.34"},{"v":"-1.25"},{"v":"USD"},{"v":"2"}]}]}
+        """#
+        do {
+            let result = try GeminiGCPFetcher.parseQueryResponse(Data(mixedJSON.utf8))
+            _ = try GeminiGCPFetcher.parseSpend(result)
+            check("gemini.gcp.parse.mixed-currency-rejected", false)
+        } catch ProviderError.decoding {
+            check("gemini.gcp.parse.mixed-currency-rejected", true)
+        } catch {
+            check("gemini.gcp.parse.mixed-currency-rejected", false)
+        }
+
+        // Discovery result decoding: service descriptions + attributed cost.
+        let discoveryJSON = #"""
+        {"jobComplete":true,"rows":[
+          {"f":[{"v":"Google Cloud Vertex AI"},{"v":"10.00"},{"v":"USD"}]},
+          {"f":[{"v":"Gemini Code Assist"},{"v":"5.00"},{"v":"USD"}]}
+        ]}
+        """#
+        do {
+            let result = try GeminiGCPFetcher.parseQueryResponse(Data(discoveryJSON.utf8))
+            let services = try GeminiGCPFetcher.parseDiscovery(result)
+            check("gemini.gcp.parse.discovery-count", services.count == 2)
+            check("gemini.gcp.parse.discovery-name", services.first?.service == "Google Cloud Vertex AI")
+            check("gemini.gcp.parse.discovery-cost", services.first?.cost == Decimal(string: "10.00", locale: posix))
+            check("gemini.gcp.parse.discovery-currency", services.first?.currency == "USD")
+        } catch {
+            check("gemini.gcp.parse.discovery", false)
+        }
+
+        // Malformed responses.
+        do {
+            _ = try GeminiGCPFetcher.parseQueryResponse(Data("not json".utf8))
+            check("gemini.gcp.parse.non-json", false)
+        } catch ProviderError.decoding {
+            check("gemini.gcp.parse.non-json", true)
+        } catch {
+            check("gemini.gcp.parse.non-json", false)
+        }
+
+        do {
+            let errorJSON = #"{"jobComplete":true,"errors":[{"message":"Access Denied: Table x"}]}"#
+            _ = try GeminiGCPFetcher.parseQueryResponse(Data(errorJSON.utf8))
+            check("gemini.gcp.parse.query-errors", false)
+        } catch ProviderError.decoding {
+            check("gemini.gcp.parse.query-errors", true)
+        } catch {
+            check("gemini.gcp.parse.query-errors", false)
+        }
+
+        do {
+            let malformed = try GeminiGCPFetcher.parseQueryResponse(
+                Data(#"{"jobComplete":true,"rows":[{"f":[{"v":"12.34"}]}]}"#.utf8)
+            )
+            _ = try GeminiGCPFetcher.parseSpend(malformed)
+            check("gemini.gcp.parse.malformed-row", false)
+        } catch ProviderError.decoding {
+            check("gemini.gcp.parse.malformed-row", true)
+        } catch {
+            check("gemini.gcp.parse.malformed-row", false)
+        }
+
+        // Permission/auth failure mapping into the existing ProviderError vocabulary.
+        check("gemini.gcp.errors.403-permission",
+              GeminiGCPFetcher.mapHTTPError(status: 403, body: "") == .permissionDenied(
+                "BigQuery permission denied — the service account needs roles/bigquery.jobUser and roles/bigquery.dataViewer on the project."
+              ))
+        check("gemini.gcp.errors.401-bad-credentials",
+              GeminiGCPFetcher.mapHTTPError(status: 401, body: "") == .badCredentials(
+                "Google rejected the service account credential — check the service account JSON."
+              ))
+        check("gemini.gcp.errors.404-table",
+              GeminiGCPFetcher.mapHTTPError(status: 404, body: "") == .permissionDenied(
+                "BigQuery table not found — verify the billing-export table identifier."
+              ))
+        check("gemini.gcp.errors.429-rate-limited",
+              GeminiGCPFetcher.mapHTTPError(status: 429, body: "") == .rateLimited(retryAfter: nil))
+        check("gemini.gcp.errors.400-not-found-table",
+              GeminiGCPFetcher.mapHTTPError(status: 400, body: "Not found: Table x") == .permissionDenied(
+                "BigQuery table not found — verify the billing-export table identifier."
+              ))
+        check("gemini.gcp.errors.500-transport",
+              GeminiGCPFetcher.mapHTTPError(status: 500, body: "boom") == .transport("BigQuery HTTP 500: boom"))
+
+        // Invalid service-account JSON → badCredentials.
+        do {
+            _ = try GoogleServiceAccountTokenFetcher.parseServiceAccount("not json")
+            check("gemini.gcp.errors.invalid-service-account", false)
+        } catch ProviderError.badCredentials {
+            check("gemini.gcp.errors.invalid-service-account", true)
+        } catch {
+            check("gemini.gcp.errors.invalid-service-account", false)
+        }
+
+        // Table/project identifier validation (SQL-injection safety).
+        check("gemini.gcp.table.valid",
+              GeminiGCPFetcher.isValidTableIdentifier("my-project.my_dataset.gcp_billing_export_v1_ABC123"))
+        check("gemini.gcp.table.rejects-backtick",
+              !GeminiGCPFetcher.isValidTableIdentifier("my-project.my_dataset.`evil`"))
+        check("gemini.gcp.table.rejects-semicolon",
+              !GeminiGCPFetcher.isValidTableIdentifier("my-project.my_dataset.x; DROP"))
+        check("gemini.gcp.table.rejects-two-parts",
+              !GeminiGCPFetcher.isValidTableIdentifier("my-project.my_dataset"))
+        check("gemini.gcp.project.valid", GeminiGCPFetcher.isValidProjectID("my-gcp-project"))
+        check("gemini.gcp.project.rejects-uppercase", !GeminiGCPFetcher.isValidProjectID("MyGCPProject"))
+
+        // JWT structure: header + claims are base64url (no padding chars); a garbage key fails
+        // cleanly as badCredentials instead of crashing.
+        let account = GoogleServiceAccountTokenFetcher.ServiceAccount(
+            clientEmail: "svc@project.iam.gserviceaccount.com",
+            privateKeyPEM: "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----",
+            tokenURI: GoogleServiceAccountTokenFetcher.defaultTokenURI
+        )
+        let header = GoogleServiceAccountTokenFetcher.jwtHeader()
+        check("gemini.gcp.jwt.header-base64url",
+              !header.contains("+") && !header.contains("/") && !header.contains("="))
+        if let claims = try? GoogleServiceAccountTokenFetcher.jwtClaims(account: account, now: 1_752_000_000) {
+            check("gemini.gcp.jwt.claims-base64url",
+                  !claims.contains("+") && !claims.contains("/") && !claims.contains("="))
+        } else {
+            check("gemini.gcp.jwt.claims-base64url", false)
+        }
+        do {
+            _ = try GoogleServiceAccountTokenFetcher.signRS256(Data("data".utf8), privateKeyPEM: "not a key")
+            check("gemini.gcp.jwt.bad-key", false)
+        } catch ProviderError.badCredentials {
+            check("gemini.gcp.jwt.bad-key", true)
+        } catch {
+            check("gemini.gcp.jwt.bad-key", false)
+        }
+
+        // Stale Snapshot fallback: a persisted last-good snapshot renders even when the provider
+        // would fail — the engine never clears existing usage on a failed refresh.
+        MainActor.assumeIsolated {
+            let dir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("usage-widget-gemini-\(UUID().uuidString)", isDirectory: true)
+            defer { try? FileManager.default.removeItem(at: dir) }
+
+            let cache = SnapshotCache(directory: dir)
+            let settings = SettingsModel(store: SettingsStore(directory: dir))
+            let rates = ExchangeRateStore(cache: ExchangeRateCache(directory: dir))
+            let plan = Plan(
+                id: GeminiGCPFetcher.planID, provider: .gemini, name: GeminiGCPFetcher.planName,
+                kind: .spend, spent: Decimal(string: "11.09", locale: posix), currencyCode: "USD",
+                note: GeminiGCPFetcher.estimateNote, fetchedAt: Date(timeIntervalSince1970: 1_750_000_000)
+            )
+            try? cache.save(Snapshot(plans: [plan], fetchedAt: Date(timeIntervalSince1970: 1_750_000_000)))
+
+            let store = UsageStore(
+                providers: [FailingGeminiProvider()],
+                cache: cache,
+                settings: settings,
+                rates: rates
+            )
+            store.loadSnapshot()
+            check("gemini.gcp.stale-snapshot-restored", store.visiblePlans.first?.spent == Decimal(string: "11.09", locale: posix))
+            check("gemini.gcp.stale-snapshot-note", store.visiblePlans.first?.note == GeminiGCPFetcher.estimateNote)
+        }
+    }
+
     // MARK: - Provider parsing
 
     private static func checkParsing(_ failures: inout Int) {
@@ -341,6 +540,36 @@ enum SelfCheck {
             check("mistral.parse.kind", plan?.kind == .spend)
         } else {
             check("mistral.parse", false)
+        }
+
+        // Mistral console: embedded api_budget block → monthly quota window (percent of 100).
+        let mistralConsoleHTML = #"""
+        <html><body>
+        <script>self.__next_f.push([1,"...\"budget\":{\"api_budget\":{\"usage_percentage\":7.078156333333333,\"initial_budget\":25.5,\"currency\":\"EUR\",\"reset_at\":\"2026-09-01T00:00:00Z\",\"payg_enabled\":false}}..."])</script>
+        </body></html>
+        """#
+        if let usage = try? MistralConsoleFetcher.parse(Data(mistralConsoleHTML.utf8)) {
+            let plan = usage.plans.first
+            let window = plan?.limitWindows.first
+            check("mistral.console.parse.kind", plan?.kind == .quota)
+            check("mistral.console.parse.name", plan?.name == "Mistral API")
+            check("mistral.console.parse.window-label", window?.label == "monthly")
+            check("mistral.console.parse.window-used", abs((window?.used ?? 0) - 7.078156333333333) < 0.0001)
+            check("mistral.console.parse.window-limit", window?.limit == 100)
+            check("mistral.console.parse.window-resets", window?.resetsAt != nil)
+            check("mistral.console.parse.note", plan?.note?.contains("included monthly") == true)
+        } else {
+            check("mistral.console.parse", false)
+        }
+
+        // Expired session (login page, no budget block) → unauthorized.
+        do {
+            _ = try MistralConsoleFetcher.parse(Data("<html>login page</html>".utf8))
+            check("mistral.console.parse.expired-unauthorized", false)
+        } catch ProviderError.unauthorized {
+            check("mistral.console.parse.expired-unauthorized", true)
+        } catch {
+            check("mistral.console.parse.expired-unauthorized", false)
         }
 
         // Scaleway: sum `value` for "Generative APIs" records only (filtering other products).
@@ -516,5 +745,18 @@ enum SelfCheck {
         insert("cursorAuth/accessToken", "jwt-token-abc")
         insert("cursorAuth/stripeMembershipType", "pro")
         sqlite3_close(db)
+    }
+}
+
+/// A provider that always fails, used to verify last-good data survives a failed refresh.
+private struct FailingGeminiProvider: UsageProvider {
+    let provider = Provider.gemini
+    let minimumPollInterval: TimeInterval = 60
+
+    func authState() async -> ProviderAuthState { .signedIn }
+    func signIn() async throws -> SignInContinuation { .completed }
+    func signOut() async {}
+    func fetchUsage() async throws -> ProviderUsage {
+        throw ProviderError.permissionDenied("no access")
     }
 }

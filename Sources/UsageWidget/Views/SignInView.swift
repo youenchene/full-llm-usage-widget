@@ -10,6 +10,7 @@ struct SignInView: View {
     @State private var continuation: SignInContinuation
     @State private var input = ""
     @State private var fieldValues: [String: String] = [:]
+    @State private var selectedOptions: Set<String> = []
     @State private var error: String?
     @State private var isWorking = false
 
@@ -36,6 +37,8 @@ struct SignInView: View {
                 textFlow(instructions: instructions, placeholder: "Paste API key", action: submit)
             case .needsFields(let title, let fields, let submit):
                 fieldsFlow(title: title, fields: fields, action: submit)
+            case .needsSelection(let title, let instructions, let options, let submit):
+                selectionFlow(title: title, instructions: instructions, options: options, action: submit)
             case .deviceCode(let userCode, let verificationURL, let instructions, let poll):
                 deviceFlow(userCode: userCode, verificationURL: verificationURL, instructions: instructions, poll: poll)
             case .needsPermission(let title, let instructions, let openSettings, let retry):
@@ -116,7 +119,7 @@ struct SignInView: View {
     private func fieldsFlow(
         title: String,
         fields: [SignInField],
-        action: @escaping @Sendable ([String: String]) async throws -> Void
+        action: @escaping @Sendable ([String: String]) async throws -> SignInContinuation?
     ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title).font(.caption).foregroundStyle(.secondary)
@@ -136,12 +139,60 @@ struct SignInView: View {
                 Text(error).font(.caption2).foregroundStyle(.red)
             }
             Button {
-                submit { try await action(fieldValues) }
+                submitChained { try await action(fieldValues) }
             } label: {
                 Text(isWorking ? "Submitting…" : "Submit")
             }
             .disabled(isWorking)
         }
+    }
+
+    // MARK: - Discovery-selection flow (Gemini GCP billing export)
+
+    private func selectionFlow(
+        title: String,
+        instructions: String,
+        options: [SelectionOption],
+        action: @escaping @Sendable ([String]) async throws -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.caption.bold())
+            Text(instructions).font(.caption).foregroundStyle(.secondary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(options) { option in
+                        Toggle(isOn: selectionBinding(for: option.id)) {
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text(option.label).font(.caption)
+                                if let detail = option.detail {
+                                    Text(detail).font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .toggleStyle(.checkbox)
+                    }
+                }
+            }
+            .frame(maxHeight: 160)
+            if let error {
+                Text(error).font(.caption2).foregroundStyle(.red)
+            }
+            Button {
+                submit { try await action(Array(selectedOptions)) }
+            } label: {
+                Text(isWorking ? "Saving…" : "Save selection")
+            }
+            .disabled(isWorking || selectedOptions.isEmpty)
+        }
+    }
+
+    private func selectionBinding(for id: String) -> Binding<Bool> {
+        Binding(
+            get: { selectedOptions.contains(id) },
+            set: { isOn in
+                if isOn { selectedOptions.insert(id) } else { selectedOptions.remove(id) }
+            }
+        )
     }
 
     private func binding(for id: String) -> Binding<String> {
@@ -218,6 +269,26 @@ struct SignInView: View {
             do {
                 try await work()
                 await onFinished()
+            } catch let err {
+                self.error = err.localizedDescription
+                isWorking = false
+            }
+        }
+    }
+
+    /// Like `submit`, but the work may return a follow-up continuation (e.g. Gemini's discovery
+    /// selection). A returned continuation replaces the current step; `nil` finishes the flow.
+    private func submitChained(_ work: @escaping () async throws -> SignInContinuation?) {
+        isWorking = true
+        error = nil
+        Task {
+            do {
+                if let next = try await work() {
+                    isWorking = false
+                    continuation = next
+                } else {
+                    await onFinished()
+                }
             } catch let err {
                 self.error = err.localizedDescription
                 isWorking = false

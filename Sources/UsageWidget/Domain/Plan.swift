@@ -24,6 +24,13 @@ struct Plan: Identifiable, Codable, Hashable, Sendable {
     /// Spend plans: an optional user-set `Budget` turns the Plan into a Progress percentage.
     var budget: Budget?
 
+    /// A short note rendered under the card (e.g. Gemini's "billing-export estimate" caveat).
+    var note: String? = nil
+
+    /// When this Plan's data was last fetched, for freshness/staleness display. Optional so
+    /// existing plans (and persisted snapshots) decode unchanged.
+    var fetchedAt: Date? = nil
+
     /// The normalized 0–1 `Progress` this Plan renders as.
     ///
     /// Quota: the most-urgent `LimitWindow` (closest to its limit).
