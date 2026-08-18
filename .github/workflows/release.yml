@@ -5,7 +5,9 @@ name: Release
 # merged PR's title + body become the release note, and the .dmg is attached as the
 # release asset.
 #
-# `workflow_dispatch` lets you re-run the release manually (no PR → auto release notes).
+# Versioning is SemVer derived from git tags: every merge auto-bumps the patch
+# (v0.1.0 → v0.1.1 → v0.1.2). `workflow_dispatch` with a `bump` input bumps minor or
+# major (v0.2.0, v1.0.0); subsequent merges continue from there.
 
 on:
   pull_request:
@@ -14,6 +16,16 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump — patch is automatic on merge; choose minor/major for v0.2.0, v1.0.0, etc.'
+        required: true
+        type: choice
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
 
 permissions:
   contents: write # required to create the tag + release
@@ -54,35 +66,56 @@ jobs:
       # Decide the version tag up front and write the release notes. De-duplicates the
       # double-fire (pull_request closed + push) so a merge produces exactly one release.
       #
-      # Tag scheme:
-      #   v{version}             — first release of a given Info.plist version
-      #   v{version}-{shortsha}  — version not bumped since the last release (still unique)
-      # If the tag for this exact commit already exists, we skip (the sibling event won).
+      # Version scheme — SemVer derived from the highest existing `vX.Y.Z` tag:
+      #   patch (default, auto on merge) → v0.1.1, v0.1.2, ...
+      #   minor (workflow_dispatch)      → v0.2.0, v1.x.0, ...
+      #   major (workflow_dispatch)      → v1.0.0
+      # If this commit is already release-tagged, we skip (the sibling event won).
       - name: Prepare release metadata
         id: meta
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
+          BUMP_INPUT: ${{ github.event.inputs.bump }}
         run: |
-          VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Support/Info.plist)"
-          BASE="v${VERSION}"
-          SHORT_SHA="$(git rev-parse --short HEAD)"
+          BUMP="${BUMP_INPUT:-patch}"
           HEAD_SHA="$(git rev-parse HEAD)"
 
-          if ! git rev-parse "refs/tags/${BASE}" >/dev/null 2>&1; then
-            TAG="${BASE}"
-          elif [[ "$(git rev-parse "refs/tags/${BASE}")" == "${HEAD_SHA}" ]]; then
+          # De-dupe the merge double-fire (a merge fires both `pull_request: closed` and
+          # `push` for the same commit). If this commit is already release-tagged, the
+          # sibling event won. Manual dispatches are exempt so you can bump minor/major on
+          # an already-released commit.
+          if [[ "${GITHUB_EVENT_NAME}" != "workflow_dispatch" ]] \
+             && git tag --points-at "${HEAD_SHA}" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "Already released ${BASE} at this commit; skipping."
+            echo "HEAD already has a release tag; sibling event released it. Skipping."
             exit 0
-          else
-            TAG="${BASE}-${SHORT_SHA}"
           fi
 
+          # Compute the next semantic version from the highest existing `vX.Y.Z` tag.
+          BOOTSTRAP="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Support/Info.plist)"
+          LAST_TAG="$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)"
+
+          if [[ -z "${LAST_TAG}" ]]; then
+            NEXT_VERSION="${BOOTSTRAP}"   # first release: keep Info.plist's version unchanged
+          else
+            V="${LAST_TAG#v}"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "${V}"
+            case "${BUMP}" in
+              major) MAJOR=$((MAJOR+1)); MINOR=0; PATCH=0 ;;
+              minor) MINOR=$((MINOR+1)); PATCH=0 ;;
+              patch) PATCH=$((PATCH+1)) ;;
+              *) echo "::error::Unknown bump '${BUMP}' (expected patch|minor|major)" >&2; exit 1 ;;
+            esac
+            NEXT_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          fi
+
+          TAG="v${NEXT_VERSION}"
+          BUILD="$(git rev-list --count HEAD)"   # monotonic build number for CFBundleVersion
+
           if git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "Already released ${TAG}; skipping."
-            exit 0
+            echo "::error::Tag ${TAG} already exists. A ${BUMP} bump is not enough — pick a higher bump." >&2
+            exit 1
           fi
 
           # Release note = merged PR title + description (the release note), then commits.
@@ -96,7 +129,6 @@ jobs:
             fi
             echo "## Commits"
             echo ""
-            LAST_TAG="$(git describe --tags --abbrev=0 2>/dev/null || true)"
             if [[ -n "${LAST_TAG}" ]]; then
               git log --oneline "${LAST_TAG}..HEAD"
             else
@@ -105,11 +137,23 @@ jobs:
           } > release-notes.md
 
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${NEXT_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "build=${BUILD}" >> "$GITHUB_OUTPUT"
           echo "title=${TITLE}" >> "$GITHUB_OUTPUT"
           echo "skip=false" >> "$GITHUB_OUTPUT"
 
-          echo "Releasing ${TAG}"
+          echo "Releasing ${TAG} (bump: ${BUMP})"
           cat release-notes.md
+
+      # Write the computed SemVer into the .app's Info.plist before the build so the
+      # shipped .dmg's version matches the release tag. The repo's Info.plist stays as a
+      # 0.1.0 bootstrap; it is bumped here, not committed.
+      - name: Bump app version
+        if: steps.meta.outputs.skip != 'true'
+        run: |
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ steps.meta.outputs.version }}" Support/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ steps.meta.outputs.build }}" Support/Info.plist
+          echo "App version: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Support/Info.plist) (build $(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' Support/Info.plist))"
 
       # Fail fast with a clear per-secret message if any required secret is missing or
       # misnamed. GitHub separates Secrets from Variables — only `secrets.*` are read here,

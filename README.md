@@ -8,6 +8,7 @@ A macOS menu-bar widget showing live LLM consumption across providers, unifying 
 - [SPEC.md](SPEC.md) — spec, architecture, provider matrix, phased plan.
 - [docs/adr/](docs/adr/) — key decisions.
 - [docs/cursor-full-disk-access.md](docs/cursor-full-disk-access.md) — Cursor opt-in / Full Disk Access.
+- [docs/gemini-gcp-billing.md](docs/gemini-gcp-billing.md) — Gemini "Actual billed spend (GCP)" setup.
 
 ## Build & run
 
@@ -101,15 +102,17 @@ base64 -i DeveloperIDApplication.p12 | pbcopy   # paste the clipboard into APPLE
 
 ### Versioning
 
-The release tag comes from `CFBundleShortVersionString` in `Support/Info.plist`:
+Versions are SemVer derived from git tags, not the plist. Every merge into `main` auto-bumps
+the **patch** (`v0.1.0` → `v0.1.1` → `v0.1.2` …). The computed version is written into the built
+app's `CFBundleShortVersionString`, so the shipped `.dmg` matches the release; `Support/Info.plist`
+stays as a `0.1.0` bootstrap.
 
-| Case | Tag |
-|---|---|
-| First release of a version | `v0.1.0` |
-| Version already released at another commit | `v0.1.0-<shortsha>` |
-| Same commit already released (merge + push double-fire) | skipped |
+To bump **minor** (`v0.2.0`) or **major** (`v1.0.0`), run the workflow manually:
 
-Bump `CFBundleShortVersionString` in `Support/Info.plist` for clean semantic tags.
+> **Actions → Release → Run workflow → bump: `minor`** (or `major`)
+
+Subsequent merges then continue from the new version (`v0.2.0` → `v0.2.1` …,
+`v1.0.0` → `v1.0.1` …).
 
 ## Scripts
 
