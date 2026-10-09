@@ -120,8 +120,12 @@ struct PopoverRootView: View {
 }
 
 /// One provider's plan cards plus up/down reorder controls, so the user can reorder providers on
-/// the main tab. Multi-plan providers (e.g. OpenCode Go + Zen) stay grouped as one block.
+/// the main tab. Multi-plan providers (e.g. OpenCode Go + Zen) stay grouped as one block;
+/// providers in `combinedProviders` render all their Plans inside a single card.
 private struct ProviderBlock: View {
+    /// Providers whose Plans are facets of one account, shown as one card.
+    static let combinedProviders: Set<Provider> = [.mistral]
+
     let provider: Provider
     let plans: [Plan]
     let error: String?
@@ -133,7 +137,11 @@ private struct ProviderBlock: View {
     var body: some View {
         HStack(alignment: .top, spacing: 6) {
             VStack(alignment: .leading, spacing: DesignTokens.cardSpacing) {
-                ForEach(plans) { PlanCard(plan: $0, error: error) }
+                if Self.combinedProviders.contains(provider) && plans.count > 1 {
+                    ProviderCard(provider: provider, plans: plans, error: error)
+                } else {
+                    ForEach(plans) { PlanCard(plan: $0, error: error) }
+                }
             }
             VStack(spacing: 2) {
                 Button(action: onMoveUp) {

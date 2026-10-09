@@ -19,21 +19,10 @@ struct PlanCard: View {
                 Spacer()
             }
 
-            switch plan.kind {
-            case .quota:
-                ForEach(plan.limitWindows) { LimitWindowBar(window: $0) }
-            case .spend:
-                SpendSummary(plan: plan)
-            }
-
-            if let note = plan.note {
-                Text(note)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+            PlanContent(plan: plan)
 
             if let fetchedAt = plan.fetchedAt {
-                Text(freshnessLabel(fetchedAt))
+                Text(Freshness.label(fetchedAt))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -50,15 +39,38 @@ struct PlanCard: View {
                 .fill(.quaternary.opacity(0.35))
         )
     }
+}
 
-    /// "Updated 5m ago", flipping to a "Stale —" prefix once the data is older than
-    /// `staleThreshold` (billing-export data is expected to refresh at least daily).
-    private static let staleThreshold: TimeInterval = 6 * 60 * 60
+/// A Plan's measurements without card chrome: quota bars or spend figure, then its note. Shared
+/// by `PlanCard` and the sections of `ProviderCard`.
+struct PlanContent: View {
+    let plan: Plan
 
-    private func freshnessLabel(_ date: Date) -> String {
-        let interval = Date().timeIntervalSince(date)
-        let prefix = interval > Self.staleThreshold ? "Stale — " : ""
-        return "\(prefix)Updated \(Self.relative(interval))"
+    var body: some View {
+        switch plan.kind {
+        case .quota:
+            ForEach(plan.limitWindows) { LimitWindowBar(window: $0) }
+        case .spend:
+            SpendSummary(plan: plan)
+        }
+
+        if let note = plan.note {
+            Text(note)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// "Updated 5m ago", flipping to a "Stale —" prefix once the data is older than
+/// `staleThreshold` (billing-export data is expected to refresh at least daily).
+enum Freshness {
+    static let staleThreshold: TimeInterval = 6 * 60 * 60
+
+    static func label(_ date: Date, now: Date = Date()) -> String {
+        let interval = now.timeIntervalSince(date)
+        let prefix = interval > staleThreshold ? "Stale — " : ""
+        return "\(prefix)Updated \(relative(interval))"
     }
 
     private static func relative(_ interval: TimeInterval) -> String {
