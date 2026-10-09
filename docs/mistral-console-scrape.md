@@ -113,16 +113,64 @@ Fields (per budget):
 
 ## Mapping to the domain model
 
-The console data is a **quota** (provider-imposed limit, fixed reset window), not `spend`.
-Mapping per `CONTEXT.md`:
+The console data maps to **up to three Plans** per `CONTEXT.md`:
 
-- **Plan**: `kind: .quota`, one `LimitWindow` per budget block (`api_budget`, optionally
-  `vibe_budget`).
-  - `LimitWindow.used` = `usage_percentage / 100 × initial_budget` (≈ €1.805 for the API budget).
-  - `LimitWindow.limit` = `initial_budget` (€25.5).
-  - `LimitWindow.resetsAt` = `reset_at`.
-- **Progress**: `usage_percentage / 100` (already normalized; the engine clamps anyway).
-- **Currency**: `currency` from the budget (or `billingInfo.currency`).
+### 1. `mistral.api` — API included usage (quota)
+
+- **Kind**: `.quota` (provider-imposed limit, fixed reset window).
+- **LimitWindow**:
+  - `used` = `usage_percentage / 100 × initial_budget` (≈ €1.805 for the API budget).
+  - `limit` = `initial_budget` (€25.5) — the **hard limit** (top of the progress indicator).
+  - `resetsAt` = `reset_at`.
+- **Note**: `"€1.81 of €25.50 included monthly • Hard limit"` (or `"• Pay-as-you-go"` when
+  `payg_enabled: true`).
+
+### 2. `mistral.api.extra` — API overage (spend, pay-as-you-go beyond the included budget)
+
+- **Kind**: `.spend` (pay-as-you-go overage beyond the included budget).
+- **Spent**: month's priced API cost − `initial_budget` (see "Usage endpoint" below). Fallback when
+  that call fails: `(usage_percentage - 100) / 100 × initial_budget`, which only works on payloads
+  that don't cap the percentage.
+- **Currency**: `currency` from the budget.
+- **Note**: `"€21.71 overage this month"`.
+- **Omitted** when there is no overage.
+
+> **Verified 2026-10-09**: the live budget **caps `usage_percentage` at 100** and no longer
+> includes `payg_enabled`. A Pay-as-you-go account at €47.21 of API usage showed
+> `usage_percentage: 100`, so the overage can't come from the budget block.
+
+### Usage endpoint (`GET /api/billing/v2/usage?month=M&year=Y`)
+
+This is the JSON the console's **Organization → Usage** page fetches in the browser. It uses the
+same Ory cookie (no CSRF header is needed for GET). Shape (trimmed):
+
+```json
+{
+  "completion": {"models": {"<display>::<metric>": {"input": [Row], "output": [Row], "cached": [Row]}}},
+  "ocr": {"models": {}}, "connectors": {"models": {}}, "audio": {"models": {}},
+  "libraries_api": {"pages": {"models": {}}, "tokens": {"models": {}}, "audio_seconds": {"models": {}}},
+  "vibe_code": {"completion": {"models": {}}},
+  "chat": {"models": {}},
+  "currency": "EUR",
+  "prices": [{"event_type": "api_tokens", "billing_metric": "mistral-large-2512",
+              "billing_group": "input", "api_zone": "global", "service_tier": "standard",
+              "price": "4.25E-7"}]
+}
+```
+
+`Row` = `{billing_metric, billing_group, event_type, api_zone, service_tier, value, value_paid, timestamp, usage_type}`.
+
+The cost is **Σ `value_paid` × unit price**, with the price matched on (metric, group, event type,
+zone). This mirrors the console's own `calculateCost`. `vibe_code` (which has its own allowance)
+and `chat` are excluded. Check: pricing the `vibe_code` rows reproduces the `vibe_budget` usage
+to the cent (€8.4076). Implemented in `MistralUsageCost`.
+
+### 3. `mistral.vibe` — Vibe Code included usage (quota, optional)
+
+- **Kind**: `.quota`.
+- **LimitWindow**: same shape as `mistral.api` (used/limit in currency, `resetsAt` from `reset_at`).
+- **Note**: `"€0 of €255 included monthly (Vibe)"`.
+- **Omitted** when `vibe_budget` is absent or `initial_budget == 0`.
 
 The top-level `usage_percentage`/`initial_budget` mirror `api_budget` — use the per-budget blocks
 for fidelity rather than the top-level shorthand.
@@ -134,5 +182,6 @@ for fidelity rather than the top-level shorthand.
   (login page returned instead of data) and prompt re-auth.
 - **ToS**: scraping an authenticated console may violate Mistral's terms — flagged, same as any
   other console-scrape integration.
-- **Scope**: this is the *included monthly usage* only. It does **not** expose pay-as-you-go
-  overage spend (that stays behind the Enterprise Admin key / the `/organization/usage` dashboard).
+- **Scope**: this exposes the *included monthly usage* (quota) and the *pay-as-you-go overage*
+  (priced from the usage endpoint). It does not expose the monthly overage spending cap (that
+  setting isn't in either payload).

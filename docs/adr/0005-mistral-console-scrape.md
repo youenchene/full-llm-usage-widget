@@ -21,6 +21,19 @@ a **quota** plan.
 - Undocumented internal endpoint; may break silently (flagged in the spike doc).
 - `vibe_budget` (Vibe Code) is not surfaced in v1 — deferred, easily added later.
 
+## Update (2026-10-09)
+
+`vibe_budget` is now surfaced as a separate quota plan (`mistral.vibe`). Additionally:
+
+- The API plan (`mistral.api`) now uses **currency amounts** in its `LimitWindow` (used/limit in €),
+  with the `initial_budget` as the hard limit (top of the progress indicator).
+- A **spend plan** (`mistral.api.extra`) shows the pay-as-you-go overage. The live budget caps
+  `usage_percentage` at 100, so the overage is the month's API cost from the console's
+  `/api/billing/v2/usage` endpoint (Σ `value_paid` × price, same cookie) minus `initial_budget`.
+  That call is best-effort: if it fails, the overage falls back to `usage_percentage > 100`.
+- The plan note says **Pay-as-you-go** when overage is enabled or observed, and **Hard limit** only
+  when the payload explicitly has `payg_enabled: false` (the field is no longer always present).
+
 ## Alternatives considered
 
 - **WKWebView sign-in** (harvest the cookie automatically after login): better UX, larger change

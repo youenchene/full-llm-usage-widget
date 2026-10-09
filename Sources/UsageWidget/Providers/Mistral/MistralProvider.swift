@@ -48,7 +48,11 @@ struct MistralProvider: UsageProvider {
                 provider: .mistral,
                 title: "Mistral (console session)",
                 instructions: "Track your included monthly usage via a console session cookie.",
-                ownedPlanIDs: ["\(Provider.mistral.rawValue).api"],
+                ownedPlanIDs: [
+                    "\(Provider.mistral.rawValue).api",
+                    "\(Provider.mistral.rawValue).api.extra",
+                    "\(Provider.mistral.rawValue).vibe"
+                ],
                 isSignedIn: { await secrets.secret(for: Self.consoleSessionAccount) != nil },
                 signIn: {
                     .needsKey(instructions: "Paste the Cookie value from admin.mistral.ai (DevTools → Application → Cookies → copy the ory_session_… cookie as name=value).") { cookie in

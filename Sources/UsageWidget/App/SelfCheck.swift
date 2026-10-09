@@ -542,25 +542,135 @@ enum SelfCheck {
             check("mistral.parse", false)
         }
 
-        // Mistral console: embedded api_budget block → monthly quota window (percent of 100).
+        // Mistral console: embedded api_budget + vibe_budget blocks → quota plans with currency amounts.
         let mistralConsoleHTML = #"""
         <html><body>
-        <script>self.__next_f.push([1,"...\"budget\":{\"api_budget\":{\"usage_percentage\":7.078156333333333,\"initial_budget\":25.5,\"currency\":\"EUR\",\"reset_at\":\"2026-09-01T00:00:00Z\",\"payg_enabled\":false}}..."])</script>
+        <script>self.__next_f.push([1,"...\"budget\":{\"api_budget\":{\"usage_percentage\":7.078156333333333,\"initial_budget\":25.5,\"currency\":\"EUR\",\"reset_at\":\"2026-09-01T00:00:00Z\",\"payg_enabled\":false},\"vibe_budget\":{\"usage_percentage\":0,\"initial_budget\":255,\"currency\":\"EUR\",\"reset_at\":\"2026-09-01T00:00:00Z\",\"payg_enabled\":false}}..."])</script>
         </body></html>
         """#
         if let usage = try? MistralConsoleFetcher.parse(Data(mistralConsoleHTML.utf8)) {
-            let plan = usage.plans.first
-            let window = plan?.limitWindows.first
-            check("mistral.console.parse.kind", plan?.kind == .quota)
-            check("mistral.console.parse.name", plan?.name == "Mistral API")
-            check("mistral.console.parse.window-label", window?.label == "monthly")
-            check("mistral.console.parse.window-used", abs((window?.used ?? 0) - 7.078156333333333) < 0.0001)
-            check("mistral.console.parse.window-limit", window?.limit == 100)
-            check("mistral.console.parse.window-resets", window?.resetsAt != nil)
-            check("mistral.console.parse.note", plan?.note?.contains("included monthly") == true)
+            // API plan (quota) — currency amounts, not percentages.
+            let apiPlan = usage.plans.first { $0.id == "mistral.api" }
+            let apiWindow = apiPlan?.limitWindows.first
+            check("mistral.console.parse.api.kind", apiPlan?.kind == .quota)
+            check("mistral.console.parse.api.name", apiPlan?.name == "Mistral API")
+            check("mistral.console.parse.api.window-label", apiWindow?.label == "monthly")
+            // used = 25.5 * 7.078... / 100 ≈ 1.805
+            check("mistral.console.parse.api.window-used", abs((apiWindow?.used ?? 0) - 1.805) < 0.01)
+            // limit = initial_budget = 25.5 (hard limit)
+            check("mistral.console.parse.api.window-limit", abs((apiWindow?.limit ?? 0) - 25.5) < 0.0001)
+            check("mistral.console.parse.api.window-resets", apiWindow?.resetsAt != nil)
+            check("mistral.console.parse.api.note-hardlimit", apiPlan?.note?.contains("Hard limit") == true)
+            check("mistral.console.parse.api.note-included", apiPlan?.note?.contains("included monthly") == true)
+
+            // Vibe plan (quota).
+            let vibePlan = usage.plans.first { $0.id == "mistral.vibe" }
+            let vibeWindow = vibePlan?.limitWindows.first
+            check("mistral.console.parse.vibe.kind", vibePlan?.kind == .quota)
+            check("mistral.console.parse.vibe.name", vibePlan?.name == "Mistral Vibe")
+            check("mistral.console.parse.vibe.window-label", vibeWindow?.label == "monthly")
+            check("mistral.console.parse.vibe.window-used", abs((vibeWindow?.used ?? 0) - 0) < 0.0001)
+            check("mistral.console.parse.vibe.window-limit", abs((vibeWindow?.limit ?? 0) - 255) < 0.0001)
+            check("mistral.console.parse.vibe.note", vibePlan?.note?.contains("(Vibe)") == true)
+
+            // No extra plan when usage_percentage <= 100.
+            let extraPlan = usage.plans.first { $0.id == "mistral.api.extra" }
+            check("mistral.console.parse.no-extra-when-under", extraPlan == nil)
+
+            // Total plans: api + vibe = 2.
+            check("mistral.console.parse.plan-count", usage.plans.count == 2)
         } else {
             check("mistral.console.parse", false)
         }
+
+        // Mistral console with overage: usage_percentage > 100 → extra spend plan appears.
+        let mistralConsoleOverageHTML = #"""
+        <html><body>
+        <script>self.__next_f.push([1,"...\"budget\":{\"api_budget\":{\"usage_percentage\":120,\"initial_budget\":25.5,\"currency\":\"EUR\",\"reset_at\":\"2026-09-01T00:00:00Z\",\"payg_enabled\":true}}..."])</script>
+        </body></html>
+        """#
+        if let usage = try? MistralConsoleFetcher.parse(Data(mistralConsoleOverageHTML.utf8)) {
+            // API plan shows Pay-as-you-go note.
+            let apiPlan = usage.plans.first { $0.id == "mistral.api" }
+            check("mistral.console.overage.api.note-payg", apiPlan?.note?.contains("Pay-as-you-go") == true)
+
+            // Extra plan (spend) — overage = 25.5 * (120 - 100) / 100 = 5.1.
+            let extraPlan = usage.plans.first { $0.id == "mistral.api.extra" }
+            check("mistral.console.overage.extra.exists", extraPlan != nil)
+            check("mistral.console.overage.extra.kind", extraPlan?.kind == .spend)
+            check("mistral.console.overage.extra.name", extraPlan?.name == "Mistral API Extra")
+            let extraSpent = extraPlan?.spent.map { NSDecimalNumber(decimal: $0).doubleValue }
+            check("mistral.console.overage.extra.spent", abs((extraSpent ?? 0) - 5.1) < 0.01)
+            check("mistral.console.overage.extra.currency", extraPlan?.currencyCode == "EUR")
+            check("mistral.console.overage.extra.note", extraPlan?.note?.contains("overage") == true)
+
+            // No vibe plan (not in fixture).
+            let vibePlan = usage.plans.first { $0.id == "mistral.vibe" }
+            check("mistral.console.overage.no-vibe", vibePlan == nil)
+
+            // Total plans: api + extra = 2.
+            check("mistral.console.overage.plan-count", usage.plans.count == 2)
+        } else {
+            check("mistral.console.overage.parse", false)
+        }
+
+        // Mistral usage endpoint: Σ value_paid × unit price, excluding Vibe Code / Le Chat.
+        let mistralUsageJSON = #"""
+        {"completion":{"models":{"large::large-2512":{
+          "input":[{"usage_type":"usage","billing_metric":"large-2512","billing_group":"input","timestamp":"2026-10-03","value":2000000,"value_paid":1000000,"event_type":"api_tokens","api_zone":"global","service_tier":"standard"}],
+          "output":[{"usage_type":"usage","billing_metric":"large-2512","billing_group":"output","timestamp":"2026-10-03","value":10000,"value_paid":10000,"event_type":"api_tokens","api_zone":"global","service_tier":"standard"}]}}},
+         "ocr":{"models":{}},
+         "libraries_api":{"pages":{"models":{"ocr-x":{"pages":[{"usage_type":"usage","billing_metric":"ocr-x","billing_group":"pages","timestamp":"2026-10-04","value":100,"value_paid":100,"event_type":"api_pages","api_zone":"global"}]}}}},
+         "vibe_code":{"completion":{"models":{"large::large-2512":{"input":[{"usage_type":"vibe","billing_metric":"large-2512","billing_group":"input","timestamp":"2026-10-03","value":9000000,"value_paid":9000000,"event_type":"api_tokens","api_zone":"global","service_tier":"standard"}]}}}},
+         "chat":{"models":{}},
+         "currency":"EUR",
+         "prices":[
+          {"event_type":"api_tokens","billing_metric":"large-2512","billing_group":"input","api_zone":"global","service_tier":"standard","price":"4.25E-7"},
+          {"event_type":"api_tokens","billing_metric":"large-2512","billing_group":"output","api_zone":"global","service_tier":"standard","price":"1.275E-6"},
+          {"event_type":"api_pages","billing_metric":"ocr-x","billing_group":"pages","api_zone":"global","service_tier":"standard","price":"0.001"}]}
+        """#
+        if let cost = try? MistralUsageCost.apiCost(from: Data(mistralUsageJSON.utf8)) {
+            // 1e6 × 4.25e-7 (value_paid, not value) + 1e4 × 1.275e-6 + 100 × 0.001 = 0.53775
+            let amount = NSDecimalNumber(decimal: cost.amount).doubleValue
+            check("mistral.usage.cost.value-paid-excludes-vibe", abs(amount - 0.53775) < 1e-9)
+            check("mistral.usage.cost.currency", cost.currency == "EUR")
+        } else {
+            check("mistral.usage.cost.parse", false)
+        }
+        do {
+            _ = try MistralUsageCost.apiCost(from: Data("<html>login</html>".utf8))
+            check("mistral.usage.cost.rejects-html", false)
+        } catch {
+            check("mistral.usage.cost.rejects-html", true)
+        }
+
+        // Live shape (2026-10): the budget caps usage_percentage at 100 and omits payg_enabled, so
+        // the overage comes from the priced API cost: 47.21 − 25.5 = 21.71.
+        let mistralCappedHTML = #"""
+        <script>self.__next_f.push([1,"...\"budget\":{\"api_budget\":{\"usage_percentage\":100,\"initial_budget\":25.5,\"currency\":\"EUR\",\"reset_at\":\"2026-11-01T00:00:00Z\"}}..."])</script>
+        """#
+        if let usage = try? MistralConsoleFetcher.parse(Data(mistralCappedHTML.utf8), apiCost: Decimal(string: "47.21")) {
+            let extraPlan = usage.plans.first { $0.id == "mistral.api.extra" }
+            let extraSpent = extraPlan?.spent.map { NSDecimalNumber(decimal: $0).doubleValue }
+            check("mistral.console.capped.extra.spent", abs((extraSpent ?? 0) - 21.71) < 0.001)
+            let apiPlan = usage.plans.first { $0.id == "mistral.api" }
+            check("mistral.console.capped.api.note-payg", apiPlan?.note?.contains("Pay-as-you-go") == true)
+        } else {
+            check("mistral.console.capped.parse", false)
+        }
+        if let usage = try? MistralConsoleFetcher.parse(Data(mistralCappedHTML.utf8), apiCost: 12) {
+            check("mistral.console.capped.no-extra-under-budget", !usage.plans.contains { $0.id == "mistral.api.extra" })
+            let apiPlan = usage.plans.first { $0.id == "mistral.api" }
+            check("mistral.console.capped.api.note-no-false-hardlimit", apiPlan?.note?.contains("Hard limit") == false)
+        } else {
+            check("mistral.console.capped.under.parse", false)
+        }
+
+        // Combined provider card: section titles drop the redundant provider prefix.
+        let extraTitlePlan = Plan(id: "mistral.api.extra", provider: .mistral, name: "Mistral API Extra", kind: .spend)
+        check("providercard.title.strips-prefix", ProviderCard.sectionTitle(extraTitlePlan, provider: .mistral) == "API Extra")
+        let bareTitlePlan = Plan(id: "mistral", provider: .mistral, name: "Mistral", kind: .spend)
+        check("providercard.title.keeps-bare-name", ProviderCard.sectionTitle(bareTitlePlan, provider: .mistral) == "Mistral")
 
         // Expired session (login page, no budget block) → unauthorized.
         do {
