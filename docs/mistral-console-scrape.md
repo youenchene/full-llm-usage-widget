@@ -1,5 +1,9 @@
 # Mistral Console Scrape — Spike Findings
 
+> **Update (2026-11-12):** the included-usage quotas now come from the billing API with an API key
+> obtained by browser sign-in (`docs/mistral-billing-api.md`, ADR-0007). This scrape is kept as an
+> optional method for the priced pay-as-you-go overage.
+
 Research + live capture. Source of truth for the Phase-1+ console-scrape fetcher. The Mistral
 Admin API (`/v1/admin/usage`) is Enterprise-only (see `spike-findings.md` and the Admin API docs),
 so Pro/Free accounts have no server-side spend API. This documents the alternative: reading the

@@ -22,7 +22,7 @@ struct ConnectionsView: View {
     }
 
     /// Flatten every provider into its independently-connectable auth methods. Multi-method
-    /// providers (OpenCode Go + Zen, Claude subscription + API key) render one row per method.
+    /// providers (OpenCode Go subscription + Console, Claude subscription + API key) render one row per method.
     private var methods: [AuthMethod] {
         providers.flatMap { $0.authMethods }
     }

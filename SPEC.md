@@ -18,10 +18,10 @@ Eight plans across seven providers:
 | Codex | quota | 5h + weekly | OAuth browser → `chatgpt.com/backend-api/wham/usage` | High |
 | Copilot | quota | monthly premium requests | GitHub device flow → `api.github.com/copilot_internal/user` | High |
 | Gemini | spend (opt-in) | current-month billed spend | service account → BigQuery billing export | Medium |
-| OpenCode Go | quota | $12/5h · $30/wk · $60/mo | API key / console → `opencode.ai/auth` | Medium |
-| Mistral | spend | € | admin API key → `api.mistral.ai/v1/admin/usage` | High |
+| OpenCode Go subscription | quota | 5h · weekly · monthly (% of plan; Go / Go Plus / Go Teams) | Console device login or personal API key → `opencode.ai/zen/go/v1/usage` | High |
+| Mistral | quota (+ spend) | € included API / Vibe usage; € overage | browser sign-in → API key → `api.mistral.ai/v1/billing/budget`; overage via optional cookie; Enterprise admin key → `/v1/admin/usage` | High |
 | Scaleway | spend | € | secret key (`X-Auth-Token`) → Billing API | Medium |
-| OpenCode Zen | spend | $ balance | API key / console → `opencode.ai/auth` | Medium |
+| OpenCode Console (formerly Zen) | spend | $ spent vs. Console budget; $ balance | Console device login or personal API key → `opencode.ai/console/api/policies/current-budgets`; balance via optional cookie scrape | Medium |
 
 ### Deferred (v2+)
 
@@ -31,7 +31,7 @@ Eight plans across seven providers:
 
 ## Domain model
 
-See `CONTEXT.md`. The load-bearing terms: **Provider** (one auth) → **Plan** (N usage entities; OpenCode has Go + Zen) → **Kind** (`quota` | `spend`) → **Progress** (normalized 0–1).
+See `CONTEXT.md`. The load-bearing terms: **Provider** (one auth) → **Plan** (N usage entities; OpenCode has Go subscription + Console) → **Kind** (`quota` | `spend`) → **Progress** (normalized 0–1).
 
 ## Architecture
 

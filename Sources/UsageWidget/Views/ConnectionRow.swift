@@ -2,7 +2,7 @@ import SwiftUI
 
 /// One auth method's connection row in the dedicated Accounts panel: shows connection state and
 /// hosts the sign-in flow / sign-out action for that method alone. Multi-method providers render
-/// one row per method (OpenCode Go + Zen; Claude subscription + API key).
+/// one row per method (OpenCode Go subscription + Console; Claude subscription + API key).
 struct ConnectionRow: View {
     let method: AuthMethod
     let store: UsageStore

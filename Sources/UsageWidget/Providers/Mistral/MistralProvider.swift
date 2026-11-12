@@ -1,13 +1,14 @@
 import Foundation
 
-/// Mistral provider, supporting two independent auth methods:
-///   1. Admin API key (org spend via the Admin API — Enterprise only).
-///   2. Console session cookie (included monthly usage quota via the `/subscription` page — any
-///      plan; see docs/mistral-console-scrape.md).
+/// Mistral provider, supporting three independent auth methods:
+///   1. Mistral account (browser sign-in, as the Vibe CLI does): mints an API key that reads the
+///      billing API (`/v1/billing/budget`) for the included API and Vibe usage. Any plan.
+///   2. Console session cookie (optional): the same quotas scraped from `/subscription`, plus the
+///      priced pay-as-you-go overage, which the billing API doesn't expose.
+///   3. Admin API key (org spend via the Admin API — Enterprise only).
 ///
-/// Either or both may be present, producing up to two `Plan`s. The admin path yields a `spend`
-/// plan (no ceiling); the console path yields a `quota` plan (the € monthly included usage resets
-/// on a fixed window).
+/// When the account and the cookie are both present, the account's Plans win and the cookie only
+/// adds what's missing (the overage card). See docs/mistral-billing-api.md and ADR-0007.
 struct MistralProvider: UsageProvider {
     let provider = Provider.mistral
     let minimumPollInterval: TimeInterval = 300  // console page is heavy; poll gently
@@ -15,8 +16,17 @@ struct MistralProvider: UsageProvider {
     private let secrets: CredentialStore
     private let adminFetcher = MistralUsageFetcher()
     private let consoleFetcher = MistralConsoleFetcher()
+    private let billingFetcher = MistralBillingFetcher()
+    private let signInClient = MistralSignInClient()
     private static let adminKeyAccount = "mistral.admin-key"
     private static let consoleSessionAccount = "mistral.console-session"
+    private static let apiKeyAccount = "mistral.api-key"
+
+    private static let quotaPlanIDs = [
+        "\(Provider.mistral.rawValue).api",
+        "\(Provider.mistral.rawValue).api.extra",
+        "\(Provider.mistral.rawValue).vibe"
+    ]
 
     init(secrets: CredentialStore) {
         self.secrets = secrets
@@ -26,7 +36,44 @@ struct MistralProvider: UsageProvider {
 
     var authMethods: [AuthMethod] {
         let secrets = self.secrets
+        let signInClient = self.signInClient
         return [
+            AuthMethod(
+                id: "mistral.account",
+                provider: .mistral,
+                title: "Mistral account",
+                instructions: "Sign in in the browser. Tracks your included monthly API and Vibe usage.",
+                ownedPlanIDs: Self.quotaPlanIDs,
+                isSignedIn: { await secrets.secret(for: Self.apiKeyAccount) != nil },
+                signIn: {
+                    let process = try await signInClient.start()
+                    await Browser.open(process.signInURL)
+                    return .browserApproval(
+                        url: process.signInURL,
+                        instructions: "Approve the sign-in in your browser. This creates a Mistral API key that the widget uses only to read your usage."
+                    ) {
+                        let key = try await signInClient.waitForKey(process)
+                        await secrets.saveSecret(key, for: Self.apiKeyAccount)
+                    }
+                },
+                signOut: { await secrets.clearSecret(for: Self.apiKeyAccount) }
+            ),
+            AuthMethod(
+                id: "mistral.console",
+                provider: .mistral,
+                title: "Mistral (console session)",
+                instructions: "Optional. Adds the pay-as-you-go overage in €, via a console session cookie that expires.",
+                ownedPlanIDs: Self.quotaPlanIDs,
+                isSignedIn: { await secrets.secret(for: Self.consoleSessionAccount) != nil },
+                signIn: {
+                    .needsKey(instructions: "Paste the Cookie value from admin.mistral.ai (DevTools → Application → Cookies → copy the ory_session_… cookie as name=value).") { cookie in
+                        let trimmed = cookie.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !trimmed.isEmpty else { throw OAuthError.invalidResponse }
+                        await secrets.saveSecret(trimmed, for: Self.consoleSessionAccount)
+                    }
+                },
+                signOut: { await secrets.clearSecret(for: Self.consoleSessionAccount) }
+            ),
             AuthMethod(
                 id: "mistral.admin-key",
                 provider: .mistral,
@@ -42,26 +89,6 @@ struct MistralProvider: UsageProvider {
                     }
                 },
                 signOut: { await secrets.clearSecret(for: Self.adminKeyAccount) }
-            ),
-            AuthMethod(
-                id: "mistral.console",
-                provider: .mistral,
-                title: "Mistral (console session)",
-                instructions: "Track your included monthly usage via a console session cookie.",
-                ownedPlanIDs: [
-                    "\(Provider.mistral.rawValue).api",
-                    "\(Provider.mistral.rawValue).api.extra",
-                    "\(Provider.mistral.rawValue).vibe"
-                ],
-                isSignedIn: { await secrets.secret(for: Self.consoleSessionAccount) != nil },
-                signIn: {
-                    .needsKey(instructions: "Paste the Cookie value from admin.mistral.ai (DevTools → Application → Cookies → copy the ory_session_… cookie as name=value).") { cookie in
-                        let trimmed = cookie.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !trimmed.isEmpty else { throw OAuthError.invalidResponse }
-                        await secrets.saveSecret(trimmed, for: Self.consoleSessionAccount)
-                    }
-                },
-                signOut: { await secrets.clearSecret(for: Self.consoleSessionAccount) }
             )
         ]
     }
@@ -92,6 +119,23 @@ struct MistralProvider: UsageProvider {
         var plans: [Plan] = []
         var failures: [String] = []
 
+        if let key = await secrets.secret(for: Self.apiKeyAccount), !key.isEmpty {
+            do {
+                plans.append(contentsOf: try await billingFetcher.fetch(apiKey: key).plans)
+            } catch {
+                failures.append("account: \(error.localizedDescription)")
+            }
+        }
+
+        if let cookie = await secrets.secret(for: Self.consoleSessionAccount), !cookie.isEmpty {
+            do {
+                let consolePlans = try await consoleFetcher.fetch(sessionCookie: cookie).plans
+                plans = Self.merge(plans, adding: consolePlans)
+            } catch {
+                failures.append("console: \(error.localizedDescription)")
+            }
+        }
+
         if let key = await secrets.secret(for: Self.adminKeyAccount), !key.isEmpty {
             do {
                 plans.append(contentsOf: try await adminFetcher.fetch(apiKey: key).plans)
@@ -100,18 +144,17 @@ struct MistralProvider: UsageProvider {
             }
         }
 
-        if let cookie = await secrets.secret(for: Self.consoleSessionAccount), !cookie.isEmpty {
-            do {
-                plans.append(contentsOf: try await consoleFetcher.fetch(sessionCookie: cookie).plans)
-            } catch {
-                failures.append("console: \(error.localizedDescription)")
-            }
-        }
-
         guard !plans.isEmpty else {
             if failures.isEmpty { throw ProviderError.notSignedIn }
             throw ProviderError.transport(failures.joined(separator: "; "))
         }
         return ProviderUsage(provider: provider, plans: plans, fetchedAt: Date())
+    }
+
+    /// Plans from `extra` whose ID isn't already present (the account's Plans win over the
+    /// cookie's; the cookie then only contributes the priced overage card).
+    static func merge(_ plans: [Plan], adding extra: [Plan]) -> [Plan] {
+        let known = Set(plans.map(\.id))
+        return plans + extra.filter { !known.contains($0.id) }
     }
 }

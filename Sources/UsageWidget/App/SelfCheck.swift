@@ -682,6 +682,63 @@ enum SelfCheck {
             check("mistral.console.parse.expired-unauthorized", false)
         }
 
+        // Mistral billing API (key): api_budget + vibe_budget as plain JSON (shape from a live call).
+        let mistralBudgetJSON = #"""
+        {"vibe_budget":{"usage_percentage":12.16073936,"initial_budget":255.0,"currency":"EUR","reset_at":"2026-12-01T00:00:00Z","payg_enabled":false},
+         "api_budget":{"usage_percentage":3.490965,"initial_budget":25.5,"currency":"EUR","reset_at":"2026-12-01T00:00:00Z","payg_enabled":false},
+         "usage_percentage":3.490965,"initial_budget":25.5,"currency":"EUR","reset_at":"2026-12-01T00:00:00Z"}
+        """#
+        let mistralSubJSON = #"{"plan_name":"INDIVIDUAL","payg_enabled":true,"vibe_payg_enabled":false,"enterprise":false}"#
+        if let usage = try? MistralBillingFetcher.parse(budget: Data(mistralBudgetJSON.utf8), subscription: Data(mistralSubJSON.utf8)) {
+            let api = usage.plans.first { $0.id == "mistral.api" }
+            let vibe = usage.plans.first { $0.id == "mistral.vibe" }
+            check("mistral.billing.plans", usage.plans.count == 2)
+            check("mistral.billing.api-limit", api?.limitWindows.first?.limit == 25.5)
+            check("mistral.billing.api-used", abs((api?.limitWindows.first?.used ?? 0) - 0.89019) < 0.0001)
+            check("mistral.billing.api-reset", api?.limitWindows.first?.resetsAt != nil)
+            check("mistral.billing.payg-from-subscription", api?.note?.contains("Pay-as-you-go") == true)
+            check("mistral.billing.vibe-limit", vibe?.limitWindows.first?.limit == 255)
+        } else {
+            check("mistral.billing.parse", false)
+        }
+        // No subscription → the budget's own flag decides; past 100% → an overage card.
+        let mistralOverJSON = #"{"api_budget":{"usage_percentage":150,"initial_budget":20,"currency":"EUR","reset_at":"2026-12-01T00:00:00Z","payg_enabled":false}}"#
+        if let usage = try? MistralBillingFetcher.parse(budget: Data(mistralOverJSON.utf8), subscription: nil) {
+            check("mistral.billing.overage", usage.plans.first { $0.id == "mistral.api.extra" }?.spent == Decimal(10))
+            check("mistral.billing.no-vibe", usage.plans.allSatisfy { $0.id != "mistral.vibe" })
+        } else {
+            check("mistral.billing.overage", false)
+        }
+        check("mistral.billing.empty-throws",
+              (try? MistralBillingFetcher.parse(budget: Data("{}".utf8), subscription: nil)) == nil)
+        // Account Plans win; the cookie only adds what's missing.
+        let accountAPI = Plan(id: "mistral.api", provider: .mistral, name: "A", kind: .quota)
+        let cookieAPI = Plan(id: "mistral.api", provider: .mistral, name: "C", kind: .quota)
+        let cookieExtra = Plan(id: "mistral.api.extra", provider: .mistral, name: "X", kind: .spend)
+        let merged = MistralProvider.merge([accountAPI], adding: [cookieAPI, cookieExtra])
+        check("mistral.merge", merged.map(\.name) == ["A", "X"])
+
+        // Mistral browser sign-in: start response (origins pinned), poll states, date format.
+        let startJSON = #"""
+        {"process_id":"p1","sign_in_url":"https://console.mistral.ai/codestral/cli/authenticate?process_id=p1",
+         "poll_url":"https://console.mistral.ai/api/vibe/sign-in/poll/tok","expires_at":"2026-11-12T16:46:53.688730+00:00"}
+        """#
+        if let process = try? MistralSignInClient.parseProcess(Data(startJSON.utf8), verifier: "v") {
+            check("mistral.signin.process", process.processID == "p1" && process.pollURL.path().hasSuffix("/poll/tok"))
+            check("mistral.signin.expires", process.expiresAt == ISO8601DateFormatter().date(from: "2026-11-12T16:46:53Z"))
+        } else {
+            check("mistral.signin.process", false)
+        }
+        let foreignJSON = #"{"process_id":"p","sign_in_url":"https://evil.example/x","poll_url":"https://console.mistral.ai/api/p","expires_at":"2026-11-12T16:46:53Z"}"#
+        check("mistral.signin.rejects-foreign-origin",
+              (try? MistralSignInClient.parseProcess(Data(foreignJSON.utf8), verifier: "v")) == nil)
+        check("mistral.signin.pending", MistralSignInClient.parsePoll(Data(#"{"status":"pending"}"#.utf8)) == .pending)
+        check("mistral.signin.completed",
+              MistralSignInClient.parsePoll(Data(#"{"status":"completed","exchange_token":"t"}"#.utf8)) == .completed(exchangeToken: "t"))
+        check("mistral.signin.denied", MistralSignInClient.parsePoll(Data(#"{"status":"denied"}"#.utf8)) == .denied)
+        check("mistral.signin.completed-no-token",
+              MistralSignInClient.parsePoll(Data(#"{"status":"completed"}"#.utf8)) == .failed("no exchange token"))
+
         // Scaleway: sum `value` for "Generative APIs" records only (filtering other products).
         let scalewayJSON = #"""
         {"consumptions":[
@@ -714,41 +771,135 @@ enum SelfCheck {
             check("opencode.parse.5h", plan?.limitWindows.first(where: { $0.label == "5h" })?.used == 42)
             check("opencode.parse.weekly", plan?.limitWindows.first(where: { $0.label == "weekly" })?.used == 17)
             check("opencode.parse.monthly", plan?.limitWindows.first(where: { $0.label == "monthly" })?.used == 3)
-            check("opencode.parse.name", plan?.name == "OpenCode Go")
+            check("opencode.parse.name", plan?.name == "OpenCode Go subscription")
+            check("opencode.parse.id", plan?.id == "openCode.go")
             check("opencode.parse.kind", plan?.kind == .quota)
         } else {
             check("opencode.parse", false)
         }
 
-        // OpenCode Zen: balance/monthlyUsage are micro-cents; monthlyLimit is already dollars.
+        // OpenCode Go: a rate-limited window is blocked until reset → rendered as full.
+        let openCodeLimitedJSON = #"""
+        {"usage":{
+           "rolling":{"status":"rate-limited","percent":64,"resetsAt":"2026-08-17T20:12:00.000Z"},
+           "weekly":{"status":"ok","percent":30.5,"resetsAt":"2026-08-23T23:59:59Z"},
+           "monthly":{"status":"ok","percent":12,"resetsAt":"2026-08-31T23:59:59.000Z"}}}
+        """#
+        if let plan = try? OpenCodeGoFetcher.parse(Data(openCodeLimitedJSON.utf8)).plans.first {
+            check("opencode.go.rate-limited", plan.limitWindows.first(where: { $0.label == "5h" })?.used == 100)
+            check("opencode.go.fractional", plan.limitWindows.first(where: { $0.label == "weekly" })?.used == 30.5)
+            check("opencode.go.no-fraction-date", plan.limitWindows.first(where: { $0.label == "weekly" })?.resetsAt != nil)
+        } else {
+            check("opencode.go.rate-limited", false)
+        }
+
+        // OpenCode Console budgets: the all-spend budget closest to its limit is the headline.
+        let budgetsJSON = #"""
+        [{"policyID":"p1","ruleID":"rule_models","limitDollars":20,"spentDollars":19,"scope":"each","per":"model",
+          "coverage":"models","models":[{"providerID":"opencode","modelID":"gpt-6-astra","name":"GPT-6 Astra"}],
+          "vendors":[],"picked":true,"shared":false,"resetsAt":"2026-12-01T00:00:00.000Z"},
+         {"policyID":"p2","ruleID":"rule_all","limitDollars":100,"spentDollars":42.5,"scope":"each","per":"set",
+          "coverage":"all","models":[],"vendors":[],"picked":false,"shared":false,"resetsAt":"2026-12-01T00:00:00.000Z"},
+         {"policyID":"p3","ruleID":"rule_team","limitDollars":500,"spentDollars":50,"scope":"combined","per":"set",
+          "coverage":"all","models":[],"vendors":[],"picked":false,"shared":true,"resetsAt":"2026-12-01T00:00:00.000Z"}]
+        """#
+        if let budgets = try? OpenCodeBudgetsFetcher.parse(Data(budgetsJSON.utf8)) {
+            check("opencode.budgets.count", budgets.count == 3)
+            check("opencode.budgets.headline", OpenCodeBudgetsFetcher.headline(budgets)?.ruleID == "rule_all")
+            let plan = OpenCodeBudgetsFetcher.makePlan(budgets: budgets, balance: Decimal(12))
+            check("opencode.budgets.plan-id", plan.id == "opencode.zen")
+            check("opencode.budgets.plan-name", plan.name == "OpenCode Console")
+            check("opencode.budgets.kind", plan.kind == .spend)
+            check("opencode.budgets.spent", plan.spent == Decimal(string: "42.5", locale: Locale(identifier: "en_US_POSIX")))
+            check("opencode.budgets.budget", plan.budget?.amount == Decimal(100))
+            check("opencode.budgets.balance", plan.balance?.amount == Decimal(12))
+            check("opencode.budgets.progress", plan.progress?.value == 0.425)
+        } else {
+            check("opencode.budgets.parse", false)
+        }
+        // Only model-scoped budgets → still pick one; none → a Plan with a how-to note, no spend.
+        if let budgets = try? OpenCodeBudgetsFetcher.parse(Data(#"[{"ruleID":"r","limitDollars":0,"spentDollars":0}]"#.utf8)) {
+            check("opencode.budgets.zero-limit-full", budgets.first?.ratio == 1)
+        } else {
+            check("opencode.budgets.minimal", false)
+        }
+        let emptyConsole = OpenCodeBudgetsFetcher.makePlan(budgets: [], balance: nil)
+        check("opencode.budgets.empty-spent", emptyConsole.spent == nil && emptyConsole.budget == nil)
+        check("opencode.budgets.empty-note", emptyConsole.note != nil)
+
+        // OpenCode Console device login: token, pending, slow_down, and org selection.
+        let tokenJSON = #"{"access_token":"a","refresh_token":"r","expires_in":3600,"org_id":"wrk_2"}"#
+        if case .token(let token, let orgID) = OpenCodeConsoleAuthClient.parseToken(Data(tokenJSON.utf8), previousRefresh: nil) {
+            check("opencode.login.token", token.accessToken == "a" && token.refreshToken == "r" && token.expiresAt != nil)
+            check("opencode.login.org", orgID == "wrk_2")
+        } else {
+            check("opencode.login.token", false)
+        }
+        let rotatelessJSON = #"{"access_token":"b","expires_in":60,"org_id":null}"#
+        if case .token(let token, let orgID) = OpenCodeConsoleAuthClient.parseToken(Data(rotatelessJSON.utf8), previousRefresh: "old") {
+            check("opencode.login.keeps-refresh", token.refreshToken == "old" && orgID == nil)
+        } else {
+            check("opencode.login.keeps-refresh", false)
+        }
+        if case .pending = OpenCodeConsoleAuthClient.parseToken(Data(#"{"error":"authorization_pending"}"#.utf8), previousRefresh: nil) {
+            check("opencode.login.pending", true)
+        } else {
+            check("opencode.login.pending", false)
+        }
+        if case .slowDown = OpenCodeConsoleAuthClient.parseToken(Data(#"{"error":"slow_down"}"#.utf8), previousRefresh: nil) {
+            check("opencode.login.slow-down", true)
+        } else {
+            check("opencode.login.slow-down", false)
+        }
+        let orgs = [
+            OpenCodeConsoleAuthClient.Org(id: "wrk_b", name: "Zeta"),
+            OpenCodeConsoleAuthClient.Org(id: "wrk_a", name: "Alpha")
+        ]
+        check("opencode.login.pick-preferred", OpenCodeConsoleAuthClient.pickOrg(orgs, preferredID: "wrk_b")?.name == "Zeta")
+        check("opencode.login.pick-first-by-name", OpenCodeConsoleAuthClient.pickOrg(orgs, preferredID: nil)?.id == "wrk_a")
+        check("opencode.login.pick-none", OpenCodeConsoleAuthClient.pickOrg([], preferredID: nil) == nil)
+        let relative = OpenCodeConsoleAuthClient.DeviceCode(
+            deviceCode: "d", userCode: "U", verificationURIComplete: "auth/device?code=U", expiresIn: 600, interval: 5
+        )
+        check("opencode.login.verification-url",
+              relative.verificationURL.absoluteString == "https://opencode.ai/console/auth/device?code=U")
+
+        // OpenCode Console balance (cookie scrape): balance/monthlyUsage are micro-cents;
+        // monthlyLimit is already dollars.
         let posix = Locale(identifier: "en_US_POSIX")
         let zenHTML = #"""
         <!DOCTYPE html><html><body>
         <script>window.__BILLING__ = { balance:12420811571, monthlyUsage:461288722, monthlyLimit:null }</script>
         </body></html>
         """#
-        if let billing = try? OpenCodeZenFetcher.parse(html: zenHTML) {
+        if let billing = try? OpenCodeConsoleBalanceFetcher.parse(html: zenHTML) {
             let plan = billing.makePlan()
-            check("opencode.zen.parse.kind", plan.kind == .spend)
-            check("opencode.zen.parse.spent", plan.spent == Decimal(string: "4.61288722", locale: posix))
-            check("opencode.zen.parse.balance", plan.balance?.amount == Decimal(string: "124.20811571", locale: posix))
-            check("opencode.zen.parse.currency", plan.currencyCode == "USD")
-            check("opencode.zen.parse.budget-nil", plan.budget == nil)
+            check("opencode.balance.parse.kind", plan.kind == .spend)
+            check("opencode.balance.parse.name", plan.name == "OpenCode Console")
+            check("opencode.balance.parse.spent", plan.spent == Decimal(string: "4.61288722", locale: posix))
+            check("opencode.balance.parse.balance", plan.balance?.amount == Decimal(string: "124.20811571", locale: posix))
+            check("opencode.balance.parse.currency", plan.currencyCode == "USD")
+            check("opencode.balance.parse.budget-nil", plan.budget == nil)
         } else {
-            check("opencode.zen.parse", false)
+            check("opencode.balance.parse", false)
         }
 
-        // OpenCode Zen with a monthly limit → budget is that dollar amount (no division).
+        // OpenCode Console balance with a monthly limit → budget is that dollar amount (no division).
         let zenBudgetHTML = #"""
         <script>balance:10000000000, monthlyUsage:0, monthlyLimit:100</script>
         """#
-        if let billing = try? OpenCodeZenFetcher.parse(html: zenBudgetHTML) {
+        if let billing = try? OpenCodeConsoleBalanceFetcher.parse(html: zenBudgetHTML) {
             let plan = billing.makePlan()
-            check("opencode.zen.parse.budget", plan.budget?.amount == Decimal(100))
-            check("opencode.zen.parse.budget-spent", plan.spent == Decimal(0))
+            check("opencode.balance.parse.budget", plan.budget?.amount == Decimal(100))
+            check("opencode.balance.parse.budget-spent", plan.spent == Decimal(0))
         } else {
-            check("opencode.zen.parse.budget", false)
+            check("opencode.balance.parse.budget", false)
         }
+        check("opencode.balance.urls",
+              OpenCodeConsoleBalanceFetcher.billingURLs(workspaceID: "wrk_x").map(\.absoluteString) == [
+                  "https://opencode.ai/console/wrk_x/settings/billing",
+                  "https://opencode.ai/workspace/wrk_x/billing"
+              ])
 
         // Claude billing: `amount` is cents (decimal string); sum across buckets.
         let claudeBillingJSON = #"""

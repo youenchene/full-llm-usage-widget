@@ -1,17 +1,12 @@
 import Foundation
 
-/// Raw shape of `GET /zen/go/v1/usage` — three windows, each with an integer `percent` (0–100)
-/// and an ISO-8601 `resetsAt`.
+/// Raw shape of `GET /zen/go/v1/usage`: three windows, each with a `percent` (0–100), a `status`
+/// (`ok` | `rate-limited`) and an ISO-8601 `resetsAt`.
 private struct OpenCodeGoResponse: Decodable {
     struct Window: Decodable {
         let status: String?
-        let percent: Int?
+        let percent: Double?
         let resetsAt: String?
-        enum CodingKeys: String, CodingKey {
-            case status
-            case percent
-            case resetsAt
-        }
     }
     struct Usage: Decodable {
         let rolling: Window?
@@ -21,22 +16,21 @@ private struct OpenCodeGoResponse: Decodable {
     let usage: Usage
 }
 
-/// Fetches OpenCode Go (quota) usage. `GET /zen/go/v1/usage` returns `rolling` (5-hour),
-/// `weekly`, and `monthly` windows already normalized to an integer percent, so we map
-/// `percent → used` (limit 100) and `resetsAt → LimitWindow.resetsAt` without any dollar ceiling.
+/// Fetches the OpenCode Go subscription (quota) allowance. The endpoint still lives at
+/// `/zen/go/v1/usage` after the Zen → Console rename, and returns `rolling` (5-hour), `weekly`
+/// and `monthly` windows already normalized to a percent. We map `percent → used` (limit 100).
+/// A `rate-limited` window is blocked until it resets, so it renders as full.
 struct OpenCodeGoFetcher: Sendable {
-    static let usageURL = URL(string: "https://opencode.ai/zen/go/v1/usage")!
+    static let usageURL = URL(string: "\(OpenCodeConsole.origin)/zen/go/v1/usage")!
+    /// `openCode.go` (the Provider raw value): the ID cached snapshots already carry.
+    static let planID = "\(Provider.openCode.rawValue).go"
+    static let planName = "OpenCode Go subscription"
 
-    func fetch(apiKey: String) async throws -> ProviderUsage {
-        var request = URLRequest(url: Self.usageURL)
-        request.httpMethod = "GET"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let data = try await UsageHTTP.get(
-            request,
-            onUnauthorized: "OpenCode rejected the key — use a workspace API key (opencode.ai → workspace → Keys, format sk-…), and ensure the workspace has a Go subscription."
-        )
-        return try Self.parse(data)
+    /// The Go Plan, or `nil` when the workspace has no Go subscription (the endpoint answers 403).
+    func fetch(credential: OpenCodeCredential) async throws -> Plan? {
+        let request = OpenCodeConsole.request(Self.usageURL, credential: credential, workspaceHeader: "x-opencode-org-id")
+        guard let data = try await OpenCodeConsole.getOptional(request) else { return nil }
+        return try Self.parse(data).plans.first
     }
 
     /// Pure JSON → `ProviderUsage` mapping (no network), exposed for self-checks.
@@ -55,9 +49,9 @@ struct OpenCodeGoFetcher: Sendable {
         guard !windows.isEmpty else { throw ProviderError.decoding("No usage windows in response") }
 
         let plan = Plan(
-            id: "\(Provider.openCode.rawValue).go",
+            id: planID,
             provider: .openCode,
-            name: "OpenCode Go",
+            name: planName,
             kind: .quota,
             limitWindows: windows
         )
@@ -66,19 +60,12 @@ struct OpenCodeGoFetcher: Sendable {
 
     private static func window(_ raw: OpenCodeGoResponse.Window?, label: String) -> LimitWindow? {
         guard let raw, let percent = raw.percent else { return nil }
+        let blocked = raw.status == "rate-limited"
         return LimitWindow(
             label: label,
-            used: Double(percent),
+            used: blocked ? max(percent, 100) : percent,
             limit: 100,
-            resetsAt: parseDate(raw.resetsAt)
+            resetsAt: OpenCodeConsole.parseDate(raw.resetsAt)
         )
-    }
-
-    private static func parseDate(_ string: String?) -> Date? {
-        guard let string else { return nil }
-        let withFraction = ISO8601DateFormatter()
-        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = withFraction.date(from: string) { return date }
-        return ISO8601DateFormatter().date(from: string)
     }
 }

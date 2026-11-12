@@ -120,7 +120,7 @@ struct PopoverRootView: View {
 }
 
 /// One provider's plan cards plus up/down reorder controls, so the user can reorder providers on
-/// the main tab. Multi-plan providers (e.g. OpenCode Go + Zen) stay grouped as one block;
+/// the main tab. Multi-plan providers (e.g. OpenCode Go subscription + Console) stay grouped as one block;
 /// providers in `combinedProviders` render all their Plans inside a single card.
 private struct ProviderBlock: View {
     /// Providers whose Plans are facets of one account, shown as one card.

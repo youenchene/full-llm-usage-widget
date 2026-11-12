@@ -41,6 +41,8 @@ struct SignInView: View {
                 selectionFlow(title: title, instructions: instructions, options: options, action: submit)
             case .deviceCode(let userCode, let verificationURL, let instructions, let poll):
                 deviceFlow(userCode: userCode, verificationURL: verificationURL, instructions: instructions, poll: poll)
+            case .browserApproval(let url, let instructions, let wait):
+                browserApprovalFlow(url: url, instructions: instructions, wait: wait)
             case .needsPermission(let title, let instructions, let openSettings, let retry):
                 permissionFlow(title: title, instructions: instructions, openSettings: openSettings, retry: retry)
             }
@@ -231,6 +233,33 @@ struct SignInView: View {
                 Text(isWorking ? "Waiting for authorization…" : "I've entered the code")
             }
             .disabled(isWorking)
+        }
+    }
+
+    // MARK: - Browser approval (Mistral)
+
+    private func browserApprovalFlow(
+        url: URL,
+        instructions: String,
+        wait: @escaping @Sendable () async throws -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(instructions).font(.caption).foregroundStyle(.secondary)
+            Button("Reopen \(url.host ?? "the browser")") {
+                Browser.open(url)
+            }
+            if let error {
+                Text(error).font(.caption2).foregroundStyle(.red)
+                Button("Check again") {
+                    submit { try await wait() }
+                }
+            } else {
+                Text("Waiting for approval…").font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .task {
+            // Wait for the approval without asking for a click.
+            if !isWorking { submit { try await wait() } }
         }
     }
 
