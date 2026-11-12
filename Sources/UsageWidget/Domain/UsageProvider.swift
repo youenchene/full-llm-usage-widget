@@ -88,6 +88,9 @@ enum SignInContinuation: Sendable {
     /// Device flow: show `userCode` for the user to enter at `verificationURL`, then await `poll`
     /// (which resolves when the user authorizes). Used by GitHub Copilot.
     case deviceCode(userCode: String, verificationURL: URL, instructions: String, poll: @Sendable () async throws -> Void)
+    /// Browser approval with no code to copy: the browser is already open at `url`, and `wait`
+    /// resolves once the user approves there (it starts by itself). Used by Mistral.
+    case browserApproval(url: URL, instructions: String, wait: @Sendable () async throws -> Void)
     /// API-key flow: prompt for a pasted key and call `submit(key)`. Used by Mistral.
     case needsKey(instructions: String, submit: @Sendable (String) async throws -> Void)
     /// Multi-field credential form (e.g. Scaleway's secret key + organization ID). Call

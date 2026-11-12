@@ -34,6 +34,11 @@ a **quota** plan.
 - The plan note says **Pay-as-you-go** when overage is enabled or observed, and **Hard limit** only
   when the payload explicitly has `payg_enabled: false` (the field is no longer always present).
 
+## Update (2026-11-12)
+
+Superseded for the included-usage quotas by ADR-0007 (billing API + browser sign-in). The cookie
+method remains, optional, for the priced pay-as-you-go overage only.
+
 ## Alternatives considered
 
 - **WKWebView sign-in** (harvest the cookie automatically after login): better UX, larger change

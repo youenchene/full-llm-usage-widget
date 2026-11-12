@@ -682,6 +682,63 @@ enum SelfCheck {
             check("mistral.console.parse.expired-unauthorized", false)
         }
 
+        // Mistral billing API (key): api_budget + vibe_budget as plain JSON (shape from a live call).
+        let mistralBudgetJSON = #"""
+        {"vibe_budget":{"usage_percentage":12.16073936,"initial_budget":255.0,"currency":"EUR","reset_at":"2026-12-01T00:00:00Z","payg_enabled":false},
+         "api_budget":{"usage_percentage":3.490965,"initial_budget":25.5,"currency":"EUR","reset_at":"2026-12-01T00:00:00Z","payg_enabled":false},
+         "usage_percentage":3.490965,"initial_budget":25.5,"currency":"EUR","reset_at":"2026-12-01T00:00:00Z"}
+        """#
+        let mistralSubJSON = #"{"plan_name":"INDIVIDUAL","payg_enabled":true,"vibe_payg_enabled":false,"enterprise":false}"#
+        if let usage = try? MistralBillingFetcher.parse(budget: Data(mistralBudgetJSON.utf8), subscription: Data(mistralSubJSON.utf8)) {
+            let api = usage.plans.first { $0.id == "mistral.api" }
+            let vibe = usage.plans.first { $0.id == "mistral.vibe" }
+            check("mistral.billing.plans", usage.plans.count == 2)
+            check("mistral.billing.api-limit", api?.limitWindows.first?.limit == 25.5)
+            check("mistral.billing.api-used", abs((api?.limitWindows.first?.used ?? 0) - 0.89019) < 0.0001)
+            check("mistral.billing.api-reset", api?.limitWindows.first?.resetsAt != nil)
+            check("mistral.billing.payg-from-subscription", api?.note?.contains("Pay-as-you-go") == true)
+            check("mistral.billing.vibe-limit", vibe?.limitWindows.first?.limit == 255)
+        } else {
+            check("mistral.billing.parse", false)
+        }
+        // No subscription → the budget's own flag decides; past 100% → an overage card.
+        let mistralOverJSON = #"{"api_budget":{"usage_percentage":150,"initial_budget":20,"currency":"EUR","reset_at":"2026-12-01T00:00:00Z","payg_enabled":false}}"#
+        if let usage = try? MistralBillingFetcher.parse(budget: Data(mistralOverJSON.utf8), subscription: nil) {
+            check("mistral.billing.overage", usage.plans.first { $0.id == "mistral.api.extra" }?.spent == Decimal(10))
+            check("mistral.billing.no-vibe", usage.plans.allSatisfy { $0.id != "mistral.vibe" })
+        } else {
+            check("mistral.billing.overage", false)
+        }
+        check("mistral.billing.empty-throws",
+              (try? MistralBillingFetcher.parse(budget: Data("{}".utf8), subscription: nil)) == nil)
+        // Account Plans win; the cookie only adds what's missing.
+        let accountAPI = Plan(id: "mistral.api", provider: .mistral, name: "A", kind: .quota)
+        let cookieAPI = Plan(id: "mistral.api", provider: .mistral, name: "C", kind: .quota)
+        let cookieExtra = Plan(id: "mistral.api.extra", provider: .mistral, name: "X", kind: .spend)
+        let merged = MistralProvider.merge([accountAPI], adding: [cookieAPI, cookieExtra])
+        check("mistral.merge", merged.map(\.name) == ["A", "X"])
+
+        // Mistral browser sign-in: start response (origins pinned), poll states, date format.
+        let startJSON = #"""
+        {"process_id":"p1","sign_in_url":"https://console.mistral.ai/codestral/cli/authenticate?process_id=p1",
+         "poll_url":"https://console.mistral.ai/api/vibe/sign-in/poll/tok","expires_at":"2026-11-12T16:46:53.688730+00:00"}
+        """#
+        if let process = try? MistralSignInClient.parseProcess(Data(startJSON.utf8), verifier: "v") {
+            check("mistral.signin.process", process.processID == "p1" && process.pollURL.path().hasSuffix("/poll/tok"))
+            check("mistral.signin.expires", process.expiresAt == ISO8601DateFormatter().date(from: "2026-11-12T16:46:53Z"))
+        } else {
+            check("mistral.signin.process", false)
+        }
+        let foreignJSON = #"{"process_id":"p","sign_in_url":"https://evil.example/x","poll_url":"https://console.mistral.ai/api/p","expires_at":"2026-11-12T16:46:53Z"}"#
+        check("mistral.signin.rejects-foreign-origin",
+              (try? MistralSignInClient.parseProcess(Data(foreignJSON.utf8), verifier: "v")) == nil)
+        check("mistral.signin.pending", MistralSignInClient.parsePoll(Data(#"{"status":"pending"}"#.utf8)) == .pending)
+        check("mistral.signin.completed",
+              MistralSignInClient.parsePoll(Data(#"{"status":"completed","exchange_token":"t"}"#.utf8)) == .completed(exchangeToken: "t"))
+        check("mistral.signin.denied", MistralSignInClient.parsePoll(Data(#"{"status":"denied"}"#.utf8)) == .denied)
+        check("mistral.signin.completed-no-token",
+              MistralSignInClient.parsePoll(Data(#"{"status":"completed"}"#.utf8)) == .failed("no exchange token"))
+
         // Scaleway: sum `value` for "Generative APIs" records only (filtering other products).
         let scalewayJSON = #"""
         {"consumptions":[

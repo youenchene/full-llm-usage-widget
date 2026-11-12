@@ -90,7 +90,7 @@ struct MistralConsoleFetcher: Sendable {
     /// The pay-as-you-go overage beyond the included budget, or `nil` when there is none.
     /// Prefers the priced `apiCost`; falls back to `usage_percentage > 100` (older payloads that
     /// didn't cap the percentage).
-    private static func overage(of block: BudgetBlock, apiCost: Decimal?) -> Decimal? {
+    static func overage(of block: BudgetBlock, apiCost: Decimal?) -> Decimal? {
         let amount: Decimal
         if let apiCost {
             amount = apiCost - Decimal(block.initialBudget)
@@ -103,7 +103,7 @@ struct MistralConsoleFetcher: Sendable {
     /// The included monthly API usage as a quota plan. The `initial_budget` is the top of the
     /// progress indicator. The note says "Pay-as-you-go" when overage is allowed or observed,
     /// "Hard limit" only when the payload explicitly says `payg_enabled: false`.
-    private static func makeAPIPlan(from block: BudgetBlock, hasOverage: Bool) -> Plan {
+    static func makeAPIPlan(from block: BudgetBlock, hasOverage: Bool) -> Plan {
         let usedAmount = block.initialBudget * block.usagePercentage / 100
         let limitAmount = block.initialBudget
         let limitType: String? = (hasOverage || block.paygEnabled == true)
@@ -131,7 +131,7 @@ struct MistralConsoleFetcher: Sendable {
     }
 
     /// The pay-as-you-go overage beyond the included budget, as a spend plan.
-    private static func makeAPIExtraPlan(overage: Decimal, currency: String) -> Plan {
+    static func makeAPIExtraPlan(overage: Decimal, currency: String) -> Plan {
         Plan(
             id: "\(Provider.mistral.rawValue).api.extra",
             provider: .mistral,
@@ -145,7 +145,7 @@ struct MistralConsoleFetcher: Sendable {
     }
 
     /// The included monthly Vibe Code usage as a quota plan.
-    private static func makeVibePlan(from block: BudgetBlock) -> Plan {
+    static func makeVibePlan(from block: BudgetBlock) -> Plan {
         let usedAmount = block.initialBudget * block.usagePercentage / 100
         let limitAmount = block.initialBudget
         let note = "\(Formatting.currency(Decimal(usedAmount), code: block.currency)) of \(Formatting.currency(Decimal(limitAmount), code: block.currency)) included monthly (Vibe)"
@@ -171,7 +171,7 @@ struct MistralConsoleFetcher: Sendable {
     // MARK: - Payload extraction
 
     /// Flat shape of the `api_budget` (and `vibe_budget`) block embedded in the RSC payload.
-    private struct BudgetBlock: Decodable {
+    struct BudgetBlock: Decodable, Sendable {
         let usagePercentage: Double
         let initialBudget: Double
         let currency: String

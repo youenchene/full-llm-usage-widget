@@ -19,7 +19,7 @@ Eight plans across seven providers:
 | Copilot | quota | monthly premium requests | GitHub device flow → `api.github.com/copilot_internal/user` | High |
 | Gemini | spend (opt-in) | current-month billed spend | service account → BigQuery billing export | Medium |
 | OpenCode Go subscription | quota | 5h · weekly · monthly (% of plan; Go / Go Plus / Go Teams) | Console device login or personal API key → `opencode.ai/zen/go/v1/usage` | High |
-| Mistral | spend | € | admin API key → `api.mistral.ai/v1/admin/usage` | High |
+| Mistral | quota (+ spend) | € included API / Vibe usage; € overage | browser sign-in → API key → `api.mistral.ai/v1/billing/budget`; overage via optional cookie; Enterprise admin key → `/v1/admin/usage` | High |
 | Scaleway | spend | € | secret key (`X-Auth-Token`) → Billing API | Medium |
 | OpenCode Console (formerly Zen) | spend | $ spent vs. Console budget; $ balance | Console device login or personal API key → `opencode.ai/console/api/policies/current-budgets`; balance via optional cookie scrape | Medium |
 
