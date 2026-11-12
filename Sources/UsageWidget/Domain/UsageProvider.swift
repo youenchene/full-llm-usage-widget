@@ -116,7 +116,7 @@ enum ProviderAuthState: Sendable, Equatable {
 
 /// A single independently-connectable credential a provider exposes.
 ///
-/// Most providers expose exactly one. OpenCode exposes two (`Go` quota + `Zen` spend); Claude
+/// Most providers expose exactly one. OpenCode exposes two (`Go subscription` quota + `Console` spend); Claude
 /// exposes two (subscription OAuth + admin API key). Each method is connected and disconnected on
 /// its own — the Accounts panel treats them as separate sign-ins, while the domain model keeps
 /// them as two Plans under one Provider.

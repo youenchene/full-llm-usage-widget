@@ -3,7 +3,7 @@ import Foundation
 /// A vendor account the widget authenticates against to read usage.
 ///
 /// The seven providers tracked in v1. A Provider can expose more than one `Plan`
-/// (OpenCode exposes `Go` and `Zen`).
+/// (OpenCode exposes `Go subscription` and `Console`).
 enum Provider: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
     case claude
     case codex

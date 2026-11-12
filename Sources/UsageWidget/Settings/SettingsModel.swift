@@ -36,10 +36,12 @@ final class SettingsModel {
     func budget(for planID: String) -> Budget? { value.budgets[planID] }
 
     /// Apply the user's Budget (if any) to a spend Plan so it can render a Progress (ADR-0002).
+    /// A user-set Budget wins; otherwise the provider-reported one (e.g. an OpenCode Console
+    /// budget policy) is kept.
     func applyingBudget(to plan: Plan) -> Plan {
         guard plan.kind == .spend else { return plan }
         var copy = plan
-        copy.budget = value.budgets[plan.id]
+        copy.budget = value.budgets[plan.id] ?? plan.budget
         return copy
     }
 

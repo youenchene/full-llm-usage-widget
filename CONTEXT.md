@@ -9,7 +9,7 @@ A vendor account the widget authenticates against to read usage (OpenAI, Anthrop
 _Avoid_: vendor, service, account
 
 **Plan**:
-A distinct tracked consumption entity under a Provider. A Provider can expose more than one — OpenCode has `Go` and `Zen`; every other provider has exactly one.
+A distinct tracked consumption entity under a Provider. A Provider can expose more than one — OpenCode has `Go subscription` and `Console`; every other provider has exactly one.
 _Avoid_: virtual provider, subscription
 
 **Kind**:
@@ -21,7 +21,7 @@ A Plan whose limit is provider-imposed and resets on a fixed window (e.g. Codex 
 _Avoid_: limit plan, allowance
 
 **Spend**:
-A Plan whose consumption is measured in currency with no provider-imposed ceiling (pay-as-you-go, e.g. Mistral, Scaleway, OpenCode Zen).
+A Plan whose consumption is measured in currency with no provider-imposed ceiling (pay-as-you-go, e.g. Mistral, Scaleway, OpenCode Console — formerly "OpenCode Zen").
 _Avoid_: metered, pay-as-you-go, billed
 
 **LimitWindow**:
@@ -29,11 +29,11 @@ A single `(used, limit, resetsAt)` measurement inside a quota Plan (a quota Plan
 _Avoid_: window, period, bucket
 
 **Balance**:
-Remaining prepaid credit on a spend Plan (OpenCode Zen auto-reloads its balance).
+Remaining prepaid credit on a spend Plan (OpenCode Console auto-reloads its balance).
 _Avoid_: credit, remaining funds
 
 **Budget**:
-A user-set monthly currency ceiling applied to a spend Plan so it can render as a percentage.
+A monthly currency ceiling applied to a spend Plan so it can render as a percentage. Usually user-set in Settings; a provider can also report one (an OpenCode Console budget policy), and a user-set Budget overrides it.
 _Avoid_: cap, spending limit — Mistral's own `spend-limit` is a distinct, provider-side concept.
 
 **Progress**:

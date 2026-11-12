@@ -17,6 +17,9 @@ implement against. Per-provider: endpoint, method, auth, representative response
 
 ## 1. OpenCode Go & Zen
 
+> **Superseded (2026-11-12):** Zen is now **OpenCode Console**, and both Go and Console spend are
+> read with a bearer credential. See `docs/opencode-console.md` and ADR-0006. Kept for history.
+
 Source inspected: `anomalyco/opencode` (the console app lives in `packages/console`; the API
 routes under `packages/console/app/src/routes/zen`). Base URL is `https://opencode.ai`
 (`packages/console/app/src/config.ts`).

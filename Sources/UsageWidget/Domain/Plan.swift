@@ -2,7 +2,7 @@ import Foundation
 
 /// A distinct tracked consumption entity under a Provider.
 ///
-/// A Provider can expose more than one (OpenCode has `Go` and `Zen`); every other
+/// A Provider can expose more than one (OpenCode has `Go subscription` and `Console`); every other
 /// provider has exactly one. Each Plan carries its own latest usage.
 struct Plan: Identifiable, Codable, Hashable, Sendable {
     /// A stable identifier, unique within its Provider (e.g. "opencode.go").

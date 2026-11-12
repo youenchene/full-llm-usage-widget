@@ -5,6 +5,7 @@
 // Phase 3 wires Scaleway and OpenCode Go.
 // Gemini connects via the optional "Actual billed spend (GCP)" mode (BigQuery billing export —
 // see docs/gemini-gcp-billing.md); its AI Studio / Antigravity quota mode is deferred (no public
-// usage endpoint — see docs/spike-findings.md). OpenCode Zen ships inside OpenCodeProvider.
+// usage endpoint — see docs/spike-findings.md). OpenCode Go subscription and OpenCode Console (formerly Zen) both ship
+// inside OpenCodeProvider (see docs/opencode-console.md).
 // Phase 5 wires Cursor (local state.vscdb read behind Full Disk Access, opt-in).
 // Each conforms to `UsageProvider` (Domain/) and returns a normalized `ProviderUsage`.
